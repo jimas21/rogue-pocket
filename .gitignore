@@ -1,0 +1,43 @@
+# Never commit game data, saves or signing material. This repo is PUBLIC.
+
+# ROMs, saves, emulator state
+*.gba
+*.gb
+*.gbc
+*.sav
+*.srm
+*.ss0
+*.ss1
+*.ss2
+*.ss3
+*.state
+*.state.*
+*.rtc
+*.zip
+*.7z
+
+# Apple signing and API material
+*.p8
+*.p12
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+*.pem
+*.key
+AuthKey_*
+.env
+.env.*
+
+# Generated at build time (XcodeGen regenerates the project)
+*.xcodeproj
+*.xcworkspace
+build/
+DerivedData/
+*.xcarchive
+*.ipa
+xcuserdata/
+.DS_Store
+
+# libmgba source checkout and build output (ci/build_mgba.sh recreates them)
+Vendor/
