@@ -136,8 +136,17 @@ syms="$(xcrun nm -g "$lib" 2>/dev/null || true)"
 for sym in _mCoreFind _mCoreLoadFile _mCoreLoadSaveFile _mCoreInitConfig _mCoreConfigSetIntValue _GBACoreCreate _GBASavedataSize; do
   grep -q " T $sym\$" <<<"$syms" || die "libmgba.a does not define $sym. Is it an LTO (bitcode) archive? mgba_patch.py should have removed -flto."
 done
-if grep -qE ' U _(crc32|inflate|png_create)' <<<"$syms"; then
-  die "libmgba.a references zlib/libpng symbols, but the app does not link them; DISABLE_DEPS did not take effect."
+# Only symbols the archive references but never defines can be outside dependencies: without zlib, mGBA builds
+# its own crc32 (src/util/crc32.c), so "U _crc32" in one object is resolved by "T _crc32" in another.
+defined="$(awk '$2 ~ /^[TDSBCRVW]$/ {print $3}' <<<"$syms" | sort -u)"
+undefined="$(awk '$1 == "U" {print $2}' <<<"$syms" | sort -u)"
+external="$(comm -23 <(printf '%s
+' "$undefined") <(printf '%s
+' "$defined"))"
+deps="$(grep -E '^_(crc32|adler32|inflate|deflate|png_)' <<<"$external" || true)"
+if [ -n "$deps" ]; then
+  echo "$deps" | head -n 10 >&2
+  die "libmgba.a needs zlib/libpng symbols (above), but the app does not link them; DISABLE_DEPS did not take effect."
 fi
 echo "libmgba.a: arm64, core symbols present, no zlib/png references. Size: $(du -h "$lib" | cut -f1)"
 
