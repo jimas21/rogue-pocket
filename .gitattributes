@@ -1,0 +1,10 @@
+# Scripts run on a Mac runner: LF line endings only, even when committed from Windows.
+* text=auto
+*.sh text eol=lf
+*.yml text eol=lf
+*.plist text eol=lf
+*.swift text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.py text eol=lf
+*.png binary

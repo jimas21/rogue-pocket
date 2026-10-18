@@ -1,0 +1,55 @@
+name: mGBA core check
+
+# Builds libmgba for iOS and compiles the whole app UNSIGNED on a cloud Mac. No secrets, no Apple account, no
+# upload: it only answers "does the code compile and link?". It can run before the developer account is ready.
+# Push to main and manual runs only (same rule as testflight.yml: no pull-request triggers).
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mgba-check
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Build libmgba and compile unsigned
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i 'iOS ' || true
+          cmake --version | head -n 1 || echo "cmake not preinstalled (build_mgba.sh installs it)"
+          python3 --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen || { brew update && brew install xcodegen; }
+
+      - name: Build libmgba and compile the app (unsigned)
+        run: bash ci/check_build.sh
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### mGBA core check passed"
+            echo ""
+            echo "- libmgba: \`$(sed -n 's/^mGBA commit: //p' Vendor/mgba-dist/BUILD-INFO.txt)\` built for iOS arm64"
+            echo "- libmgba.a size: $(du -h Vendor/mgba-dist/lib/libmgba.a | cut -f1)"
+            echo "- The app compiled and linked unsigned. This is not an installable build."
+          } >> "$GITHUB_STEP_SUMMARY"

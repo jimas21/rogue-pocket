@@ -1,0 +1,93 @@
+name: TestFlight
+
+# Builds on a cloud Mac and uploads to TestFlight. Triggers are push to main and manual only:
+# pull requests (including forks) never run this, because it holds signing secrets.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One build at a time; never cancel a run that may be mid-upload.
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Archive and upload
+    # Skipped (grey, no failure email) until the repo variables exist, i.e. until the Apple account is set up.
+    # Once they are set, preflight.sh still checks every variable and secret before anything else runs.
+    if: ${{ vars.TEAM_ID != '' && vars.BUNDLE_ID != '' }}
+    runs-on: macos-26   # Xcode 26.x default, iOS 26 SDK (Apple requires it for uploads). Plain runner: free on public repos.
+    timeout-minutes: 45
+    env:
+      # Not secret: repo VARIABLES (Settings > Secrets and variables > Actions > Variables).
+      BUNDLE_ID: ${{ vars.BUNDLE_ID }}
+      TEAM_ID: ${{ vars.TEAM_ID }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Preflight (settings present and well-formed)
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: bash ci/preflight.sh
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcode-select -p
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i 'iOS ' || true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen || { brew update && brew install xcodegen; }
+
+      # Spike 002: the app links libmgba. Built here from a pinned commit (about 2 minutes), before archiving.
+      - name: Build libmgba for iOS
+        run: bash ci/build_mgba.sh
+
+      - name: Write API key to a temp file
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: bash ci/write_key.sh
+
+      - name: Generate project and archive
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: bash ci/archive.sh
+
+      - name: Export and upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: bash ci/export_upload.sh
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### Uploaded to TestFlight"
+            echo ""
+            echo "- Build number: \`${GITHUB_RUN_NUMBER}\`"
+            echo "- Marketing version: \`$(grep -m1 'MARKETING_VERSION' project.yml | sed 's/.*: *//; s/\"//g; s/ *#.*//')\`"
+            echo "- Commit: \`${GITHUB_SHA::7}\`"
+            echo "- mGBA: \`$(sed -n 's/^mGBA commit: //p' Vendor/mgba-dist/BUILD-INFO.txt)\`"
+            echo ""
+            echo "The build appears in App Store Connect > TestFlight after Apple finishes processing it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove API key file
+        if: always()
+        run: bash ci/cleanup.sh
