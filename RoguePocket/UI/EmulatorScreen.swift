@@ -7,6 +7,7 @@ import SwiftUI
 struct EmulatorScreen: View {
     @ObservedObject var emu: Emulator
     @ObservedObject var sync: SyncManager
+    @ObservedObject var dex: DexHost
     @Environment(\.dismiss) private var dismiss
     @AppStorage("showDebug") private var showDebug = false
     @AppStorage("ffSpeed") private var ffSpeed = 3
@@ -66,7 +67,7 @@ struct EmulatorScreen: View {
             Button {
                 showDex = true
             } label: {
-                DexStrip(sync: sync)
+                DexStrip(dex: dex, overlay: emu.overlay)
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 10)
@@ -215,38 +216,35 @@ struct EmulatorScreen: View {
     }
 }
 
-/// The strip between the picture and the controls in portrait. The Rogue Dex card goes here; until then it shows
-/// what the sync is doing, so a pending save or an offline phone is visible while playing.
+/// The strip between the picture and the controls in portrait. In a battle it remembers what the foe has shown
+/// (BattleMemoryView); otherwise it is the Dex button. Its height never changes, so the controls never move.
 private struct DexStrip: View {
-    @ObservedObject var sync: SyncManager
+    let dex: DexHost
+    @ObservedObject var overlay: BattleOverlay
+    @StateObject private var memory = BattleMemory()
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: sync.paired ? "externaldrive.fill.badge.checkmark" : "externaldrive")
-                .foregroundStyle(sync.paired ? .green : .secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(sync.statusText)
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(2)
-                if let last = sync.lastSync {
-                    Text("Synced \(last.formatted(.relative(presentation: .named)))")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-            }
-            Spacer(minLength: 0)
-            if sync.syncing {
-                ProgressView().tint(.white)
+        Group {
+            if let facts = memory.facts {
+                BattleMemoryView(facts: facts, overlay: overlay)
             } else {
-                Label("Dex", systemImage: "book.fill")
-                    .font(.caption.bold())
-                    .foregroundStyle(.white.opacity(0.8))
+                HStack {
+                    Label("Rogue Dex", systemImage: "book.fill")
+                        .font(.footnote.bold())
+                        .foregroundStyle(.white.opacity(0.75))
+                    Spacer(minLength: 0)
+                }
             }
         }
         .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 64, maxHeight: 64, alignment: .leading)
         .background(Color(red: 0.12, green: 0.15, blue: 0.2), in: RoundedRectangle(cornerRadius: 12))
+        .task {
+            while !Task.isCancelled {
+                await MainActor.run { memory.refresh(from: dex.battleSnapshot(), data: overlay.data) }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
     }
 }
 

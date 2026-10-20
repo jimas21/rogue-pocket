@@ -21,6 +21,12 @@ final class DexHost: ObservableObject {
 
     func start() { server.start() }
 
+    /// The live reader's /battle answer (only what the battle has revealed), or nil when it has none.
+    func battleSnapshot() -> [String: Any]? {
+        guard let answer = liveBridge()?.answer(path: "/battle", query: [:]), answer.0 == 200 else { return nil }
+        return (try? JSONSerialization.jsonObject(with: answer.1)) as? [String: Any]
+    }
+
     private func liveBridge() -> LiveBridge? {
         if bridge == nil { bridge = LiveBridge(emulator: emulator) }
         return bridge

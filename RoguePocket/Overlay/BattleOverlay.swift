@@ -29,6 +29,11 @@ final class TypeData {
     private let moveName: [String]
     /// Species id -> its types, for an Illusion disguise (the game shows the disguise's species types).
     let speciesTypes: [Int: [Int]]
+    private let abilityName: [String]
+
+    func moveName(_ id: Int) -> String? { id > 0 && id < moveName.count ? moveName[id] : nil }
+    func moveTypeOf(_ id: Int) -> Int? { id > 0 && id < moveType.count && moveType[id] >= 0 ? moveType[id] : nil }
+    func abilityName(_ id: Int) -> String? { id > 0 && id < abilityName.count ? abilityName[id] : nil }
 
     /// Moves whose type depends on the user, the weather or the terrain: no tag rather than a wrong one.
     private static let variableType: Set<String> = [
@@ -52,6 +57,7 @@ final class TypeData {
             if let id = sp["id"] as? Int, let t = sp["types"] as? [Int] { types[id] = t }
         }
         speciesTypes = types
+        abilityName = (obj["abilities"] as? [[Any]] ?? []).map { $0.first as? String ?? "" }
     }
 
     /// Damage multiplier of an attacking type against a battler's types (the game skips a repeated type and an
@@ -193,7 +199,7 @@ enum BattleReader {
 final class BattleOverlay: ObservableObject {
     @Published private(set) var state: BattleOverlayState?
     @Published private(set) var typeIcons: [Int: UIImage] = [:]
-    private var data: TypeData?
+    private(set) var data: TypeData?
     private var loading = false
     private var lastAttempt = Date.distantPast
     private var tick = 0
