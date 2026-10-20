@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Generates the Xcode project and archives it, signed by Apple's cloud-managed
-# certificates through the App Store Connect API key.
+# Generates the Xcode project and archives it unsigned. Signing happens once, at export, with Apple's
+# cloud-managed distribution certificate. (Signing the archive made a new development certificate on
+# every fresh runner, and the account's certificate limit filled up.)
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=common.sh
@@ -41,6 +42,7 @@ xcodebuild \
   PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   CODE_SIGN_STYLE=Automatic \
+  CODE_SIGNING_ALLOWED=NO \
   CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
   archive 2>&1 | tee build/archive.log
 
