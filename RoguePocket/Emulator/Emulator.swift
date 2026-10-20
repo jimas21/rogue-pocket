@@ -318,6 +318,12 @@ final class Emulator: ObservableObject {
 
     // MARK: - Visibility / lifecycle hooks
 
+    /// A game was played before and its ROM is still on the phone, so the app can open straight into it.
+    var canResume: Bool {
+        guard let name = UserDefaults.standard.string(forKey: Emulator.lastROMKey) else { return false }
+        return localROMs().contains { $0.lastPathComponent == name }
+    }
+
     func screenDidAppear() {
         visible = true
         UIApplication.shared.isIdleTimerDisabled = true

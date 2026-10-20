@@ -2,7 +2,8 @@ import Foundation
 import UIKit
 
 /// What the battle overlay draws, in GBA pixels. Facts the player could look up, nothing more: the enemy's
-/// weaknesses above its HP box, and each damaging move's effectiveness under its name in the move menu.
+/// weaknesses above its HP box, each damaging move's effectiveness under its name in the move menu, and on the
+/// switch screen how hard the enemy's own types hit each party member.
 struct BattleOverlayState: Equatable {
     struct Weakness: Equatable {
         let type: Int
@@ -19,6 +20,16 @@ struct BattleOverlayState: Equatable {
     var weaknesses: [Weakness] = []
     /// Only while the move menu is open.
     var moveTags: [MoveTag] = []
+
+    struct PartyHint: Equatable {
+        let slot: Int          // 0...5, as the switch screen lists them
+        let type: Int          // the enemy's type that hits this member hardest
+        let multiplier: Double
+    }
+
+    /// The switch screen is up: the weaknesses go top left, and members get a hint when that hit is not neutral.
+    var partyMenu = false
+    var partyHints: [PartyHint] = []
 }
 
 /// The game's own type chart and move table, from the Dex the phone keeps (data.js is `window.DEX = {...}`).
@@ -30,6 +41,8 @@ final class TypeData {
     /// Species id -> its types, for an Illusion disguise (the game shows the disguise's species types).
     let speciesTypes: [Int: [Int]]
     private let abilityName: [String]
+    /// Species id -> its ability ids [slot 0, slot 1, hidden].
+    private let speciesAbilities: [Int: [Int]]
 
     func moveName(_ id: Int) -> String? { id > 0 && id < moveName.count ? moveName[id] : nil }
     func moveTypeOf(_ id: Int) -> Int? { id > 0 && id < moveType.count && moveType[id] >= 0 ? moveType[id] : nil }
@@ -58,6 +71,35 @@ final class TypeData {
         }
         speciesTypes = types
         abilityName = (obj["abilities"] as? [[Any]] ?? []).map { $0.first as? String ?? "" }
+        var abilities: [Int: [Int]] = [:]
+        for sp in obj["species"] as? [[String: Any]] ?? [] {
+            if let id = sp["id"] as? Int, let ab = sp["ab"] as? [Int] { abilities[id] = ab }
+        }
+        speciesAbilities = abilities
+    }
+
+    /// The name of a party member's ability: its slot's ability, or slot 0's when that slot is empty.
+    func memberAbility(species: Int, abilityNum: Int) -> String? {
+        guard let ab = speciesAbilities[species], !ab.isEmpty else { return nil }
+        let id = abilityNum < ab.count && ab[abilityNum] > 0 ? ab[abilityNum] : ab[0]
+        return abilityName(id)
+    }
+
+    /// Abilities that change how hard a type hits their owner (the same table the Dex uses).
+    private static let abilityMods: [String: [Int: Double]] = [
+        "Levitate": [4: 0], "Earth Eater": [4: 0], "Flash Fire": [10: 0], "Well-Baked Body": [10: 0],
+        "Water Absorb": [11: 0], "Storm Drain": [11: 0], "Dry Skin": [11: 0, 10: 1.25],
+        "Volt Absorb": [13: 0], "Lightning Rod": [13: 0], "Motor Drive": [13: 0], "Sap Sipper": [12: 0],
+        "Thick Fat": [10: 0.5, 15: 0.5], "Heatproof": [10: 0.5], "Water Bubble": [10: 0.5], "Purifying Salt": [7: 0.5],
+        "Fluffy": [10: 2],
+    ]
+
+    /// How hard an attacking type hits one of the player's own Pokemon, its known ability included.
+    func defense(_ attack: Int, types: [Int], ability: String?) -> Double {
+        var m = multiplier(attack, against: types)
+        if let ability, let mod = Self.abilityMods[ability]?[attack] { m *= mod }
+        if ability == "Wonder Guard", m <= 1 { m = 0 }
+        return m
     }
 
     /// Damage multiplier of an attacking type against a battler's types (the game skips a repeated type and an
@@ -97,6 +139,8 @@ final class TypeData {
 enum BattleReader {
     private static let gMain: UInt32 = 0x0300_14B4               // .callback2 at +4, .inBattle bit 1 of +0x439
     private static let battleMainCB2: UInt32 = 0x0807_E6A1
+    private static let partyMenuCB2: UInt32 = 0x0815_B225          // CB2_UpdatePartyMenu (the switch screen in battle)
+    private static let playerParty: UInt32 = 0x0203_6C7C          // struct Pokemon[6]; gPlayerPartyCount 3 bytes before
     private static let controllerFuncs: UInt32 = 0x0300_2244     // gBattlerControllerFuncs[4]
     private static let handleInputChooseMove: UInt32 = 0x0805_A6C5
     private static let battlersCount: UInt32 = 0x0201_C33C
@@ -109,8 +153,8 @@ enum BattleReader {
 
     /// nil outside a singles battle. `previous` is kept when the enemy slot is mid-swap (see below).
     static func read(_ core: MGBACore, data: TypeData, previous: BattleOverlayState?) -> BattleOverlayState? {
-        guard let main = core.readMemory(address: gMain, length: 0x43A),
-              u32(main, 4) == battleMainCB2, main[0x439] & 2 != 0,
+        guard let main = core.readMemory(address: gMain, length: 0x43A), main[0x439] & 2 != 0,
+              u32(main, 4) == battleMainCB2 || u32(main, 4) == partyMenuCB2,
               core.readMemory(address: battlersCount, length: 1)?.first == 2,
               let mons = core.readMemory(address: battleMons, length: 96 * 2) else { return nil }
         let enemy = Array(mons[96..<192])
@@ -122,11 +166,12 @@ enum BattleReader {
         if u32(slot, 0) != u32(enemy, 76) { return previous }
 
         var state = BattleOverlayState()
+        state.partyMenu = u32(main, 4) == partyMenuCB2
         var types = [Int(enemy[34]), Int(enemy[35]), Int(enemy[36])]
 
         // The enemy's HP box: its sprite must be in use, shown, and owned by battler 1 (at a battle's start the id
-        // slots still point at the previous scene's sprites).
-        if let ids = core.readMemory(address: healthboxSpriteIds, length: 2), ids[1] < 64,
+        // slots still point at the previous scene's sprites). The switch screen reuses those sprites: skip it there.
+        if !state.partyMenu, let ids = core.readMemory(address: healthboxSpriteIds, length: 2), ids[1] < 64,
            let sprite = core.readMemory(address: sprites + UInt32(ids[1]) * 68, length: 68) {
             let flags = u16(sprite, 62)
             if flags & 1 != 0, flags & 4 == 0, s16(sprite, 58) == 1 {
@@ -141,7 +186,8 @@ enum BattleReader {
         if let ptr = core.readMemory(address: battleStructPtr, length: 4).map({ u32($0, 0) }),
            let il = core.readMemory(address: ptr &+ 660 &+ 8, length: 4),
            il[0] != 0, il[1] != 0, il[2] == 0, Int(il[3]) < 6,
-           let shown = partySpecies(core, slot: Int(il[3])), let disguise = data.speciesTypes[shown] {
+           let shown = partyMon(core, base: enemyParty, slot: Int(il[3]))?.species,
+           let disguise = data.speciesTypes[shown] {
             types = disguise
         }
         state.weaknesses = (0..<19).compactMap { t -> BattleOverlayState.Weakness? in
@@ -149,6 +195,24 @@ enum BattleReader {
             let m = data.multiplier(t, against: types)
             return m > 1 ? .init(type: t, multiplier: m) : nil
         }.sorted { $0.multiplier != $1.multiplier ? $0.multiplier > $1.multiplier : $0.type < $1.type }
+
+        // The switch screen lists gPlayerParty in its stored order (the game reorders the party for the menu).
+        if state.partyMenu {
+            let count = min(Int(core.readMemory(address: playerParty - 3, length: 1)?.first ?? 0), 6)
+            let attacks = types.reduce(into: [Int]()) { list, t in
+                if t != 9 && !list.contains(t) { list.append(t) }
+            }
+            for slot in 0..<count {
+                guard let mon = partyMon(core, base: playerParty, slot: slot), !mon.isEgg,
+                      let memberTypes = data.speciesTypes[mon.species] else { continue }
+                let ability = data.memberAbility(species: mon.species, abilityNum: mon.abilityNum)
+                let hits = attacks.map { (type: $0, m: data.defense($0, types: memberTypes, ability: ability)) }
+                if let worst = hits.max(by: { $0.m < $1.m }), worst.m != 1 {
+                    state.partyHints.append(.init(slot: slot, type: worst.type, multiplier: worst.m))
+                }
+            }
+            return state
+        }
 
         // The move menu (battler 0 in singles): every damaging move gets its multiplier against the enemy.
         if let funcs = core.readMemory(address: controllerFuncs, length: 4), u32(funcs, 0) == handleInputChooseMove {
@@ -170,9 +234,9 @@ enum BattleReader {
         [2, 3, 0, 1], [3, 2, 0, 1], [1, 2, 3, 0], [1, 3, 2, 0], [2, 1, 3, 0], [3, 1, 2, 0], [2, 3, 1, 0], [3, 2, 1, 0],
     ]
 
-    /// The species of an enemy party member: decrypts its growth substruct (same rules as the live reader).
-    private static func partySpecies(_ core: MGBACore, slot: Int) -> Int? {
-        guard let b = core.readMemory(address: enemyParty + UInt32(slot * 104), length: 80) else { return nil }
+    /// Species, ability slot and egg flag of a party member: decrypts its substructs (same rules as the live reader).
+    private static func partyMon(_ core: MGBACore, base: UInt32, slot: Int) -> (species: Int, abilityNum: Int, isEgg: Bool)? {
+        guard let b = core.readMemory(address: base + UInt32(slot * 104), length: 80) else { return nil }
         let personality = u32(b, 0), key = personality ^ u32(b, 4)
         var secure = [UInt8](repeating: 0, count: 48)
         for i in 0..<12 {
@@ -182,9 +246,11 @@ enum BattleReader {
         var sum: UInt32 = 0
         for j in 0..<24 { sum &+= UInt32(u16(secure, j * 2)) }
         guard UInt16(sum & 0xFFFF) == u16(b, 28) else { return nil }
-        let growth = substructOrder[Int(personality % 24)][0] * 12
-        let species = Int(u32(secure, growth) & 0x7FF)
-        return species > 0 ? species : nil
+        let order = substructOrder[Int(personality % 24)]
+        let species = Int(u32(secure, order[0] * 12) & 0x7FF)
+        let misc = u32(secure, order[3] * 12 + 8)
+        guard species > 0 else { return nil }
+        return (species, Int((misc >> 29) & 3), (b[19] >> 2) & 1 != 0)
     }
 
     private static func u16(_ b: [UInt8], _ o: Int) -> UInt16 { UInt16(b[o]) | UInt16(b[o + 1]) << 8 }

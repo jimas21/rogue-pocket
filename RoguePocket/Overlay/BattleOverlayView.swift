@@ -10,13 +10,24 @@ struct BattleOverlayView: View {
                                     CGPoint(x: 16, y: 151), CGPoint(x: 88, y: 151)]
     /// The weakness row must end before the enemy's sprite (which starts at x 144).
     private static let weaknessRowEnd: CGFloat = 143
+    /// The switch screen: the first member's big card (its free spot is just above the card), then the free gap in
+    /// the second row of each of the five slots on the right.
+    private static let partySlots = [CGPoint(x: 60, y: 17)] + (0..<5).map { CGPoint(x: 165, y: 26 + 24 * CGFloat($0)) }
 
     var body: some View {
         Canvas { ctx, size in
             guard let state = overlay.state else { return }
             let s = size.width / 240
+            if state.partyMenu {
+                // The switch screen: its top left is empty background.
+                drawWeaknesses(state.weaknesses, at: CGPoint(x: 4, y: 3), icon: 8, ctx: ctx, s: s)
+                for hint in state.partyHints where hint.slot < Self.partySlots.count {
+                    drawHint(hint, at: Self.partySlots[hint.slot], ctx: ctx, s: s)
+                }
+                return
+            }
             if let box = state.enemyBox, !state.weaknesses.isEmpty {
-                drawWeaknesses(state.weaknesses, above: box, ctx: ctx, s: s)
+                drawWeaknesses(state.weaknesses, at: CGPoint(x: box.x + 2, y: box.y - 12), icon: 10, ctx: ctx, s: s)
             }
             for tag in state.moveTags where tag.slot < Self.moveSlots.count {
                 drawTag(tag.multiplier, at: Self.moveSlots[tag.slot], ctx: ctx, s: s)
@@ -26,15 +37,16 @@ struct BattleOverlayView: View {
     }
 
     /// Each type it is weak to: the type's icon, then its multiplier. Tightens when there are many.
-    private func drawWeaknesses(_ list: [BattleOverlayState.Weakness], above box: CGPoint, ctx: GraphicsContext, s: CGFloat) {
+    private func drawWeaknesses(_ list: [BattleOverlayState.Weakness], at origin: CGPoint, icon size: CGFloat,
+                                ctx: GraphicsContext, s: CGFloat) {
         let labels = list.map { "x" + MicroFont.number($0.multiplier) }
-        let layouts: [(icon: CGFloat, gap: CGFloat)] = [(10, 4), (10, 2), (8, 2), (8, 1)]
-        let start = box.x + 2
+        let layouts: [(icon: CGFloat, gap: CGFloat)] = [(size, 4), (size, 2), (8, 2), (8, 1)]
+        let start = origin.x
         let layout = layouts.first { l in
             start + zip(list, labels).reduce(CGFloat(0)) { $0 + l.icon + 1 + MicroFont.width($1.1) + l.gap } <= Self.weaknessRowEnd
         } ?? layouts[layouts.count - 1]
         var x = start
-        let top = box.y - 12
+        let top = origin.y
         for (w, label) in zip(list, labels) {
             if let icon = overlay.typeIcons[w.type] {
                 let inset = (10 - layout.icon) / 2
@@ -46,6 +58,18 @@ struct BattleOverlayView: View {
             MicroFont.draw(label, x: x, y: top + 3, color: Color(white: 0.97), ctx: ctx, s: s)
             x += MicroFont.width(label) + layout.gap
         }
+    }
+
+    /// A switch-screen slot: the enemy's type that hits this member hardest, and how hard (red worse, green better).
+    private func drawHint(_ hint: BattleOverlayState.PartyHint, at p: CGPoint, ctx: GraphicsContext, s: CGFloat) {
+        if let icon = overlay.typeIcons[hint.type] {
+            ctx.draw(Image(uiImage: icon).interpolation(.none), in: CGRect(x: p.x * s, y: (p.y - 1) * s, width: 8 * s, height: 8 * s))
+        }
+        let label = "x" + MicroFont.number(hint.multiplier)
+        let color = hint.multiplier > 1 ? Color(red: 1, green: 150 / 255, blue: 132 / 255)
+                                        : Color(red: 150 / 255, green: 1, blue: 170 / 255)
+        MicroFont.draw(label, x: p.x + 10, y: p.y + 2, color: Color(red: 16 / 255, green: 16 / 255, blue: 32 / 255), ctx: ctx, s: s)
+        MicroFont.draw(label, x: p.x + 9, y: p.y + 1, color: color, ctx: ctx, s: s)
     }
 
     /// Under a move's name: a short line in the effectiveness colour, then the multiplier.
