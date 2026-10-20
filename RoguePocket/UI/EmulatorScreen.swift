@@ -11,6 +11,7 @@ struct EmulatorScreen: View {
     @AppStorage("showDebug") private var showDebug = false
     @AppStorage("ffSpeed") private var ffSpeed = 3
     @State private var sheet: Sheet?
+    @State private var showDex = false
 
     /// Width of each control column in landscape.
     private static let sideColumn: CGFloat = 128
@@ -48,6 +49,7 @@ struct EmulatorScreen: View {
             SaveChoiceView(choice: choice, sync: sync)
         }
         .background(fileSheets) // the file sheets hang off their own view (one .sheet per view)
+        .background(Color.clear.sheet(isPresented: $showDex) { DexSheet(sync: sync) })
         // Touches near the screen edges go to the controls first, not to the Home/notification swipes.
         .defersSystemGestures(on: .all)
         .persistentSystemOverlays(.hidden)
@@ -61,8 +63,13 @@ struct EmulatorScreen: View {
     private var portrait: some View {
         VStack(spacing: 8) {
             picture
-            DexStrip(sync: sync)
-                .padding(.horizontal, 10)
+            Button {
+                showDex = true
+            } label: {
+                DexStrip(sync: sync)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
             ControllerPad(elements: PadLayout.portrait, layoutID: "portrait", emulator: emu)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -132,6 +139,11 @@ struct EmulatorScreen: View {
                 dismiss()
             } label: {
                 Label("Home", systemImage: "house")
+            }
+            Button {
+                showDex = true
+            } label: {
+                Label("Rogue Dex", systemImage: "book.fill")
             }
             Button {
                 Task { await sync.sync("menu") }
@@ -223,7 +235,13 @@ private struct DexStrip: View {
                 }
             }
             Spacer(minLength: 0)
-            if sync.syncing { ProgressView().tint(.white) }
+            if sync.syncing {
+                ProgressView().tint(.white)
+            } else {
+                Label("Dex", systemImage: "book.fill")
+                    .font(.caption.bold())
+                    .foregroundStyle(.white.opacity(0.8))
+            }
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)

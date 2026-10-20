@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var emulator: Emulator
     @StateObject private var sync: SyncManager
+    @StateObject private var dex: DexHost
     @Environment(\.scenePhase) private var scenePhase
     @State private var playing = false
 
@@ -12,6 +13,7 @@ struct ContentView: View {
         let emu = Emulator()
         _emulator = StateObject(wrappedValue: emu)
         _sync = StateObject(wrappedValue: SyncManager(emulator: emu))
+        _dex = StateObject(wrappedValue: DexHost(emulator: emu))
     }
 
     var body: some View {
@@ -24,7 +26,10 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             emulator.scenePhaseChanged(phase) // flushes the save first
             switch phase {
-            case .active: sync.appBecameActive()
+            case .active:
+                dex.stateChanged = { [weak sync] in sync?.dexStateChanged() }
+                dex.start()
+                sync.appBecameActive()
             case .background: sync.appWentToBackground()
             default: break
             }

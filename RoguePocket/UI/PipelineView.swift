@@ -5,6 +5,7 @@ struct PipelineView: View {
     @ObservedObject var emulator: Emulator
     @ObservedObject var sync: SyncManager
     let play: () -> Void
+    @State private var showDex = false
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -29,6 +30,15 @@ struct PipelineView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
 
+                Button {
+                    showDex = true
+                } label: {
+                    Label("Rogue Dex", systemImage: "book.fill")
+                        .frame(maxWidth: 280)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+
                 SyncPanel(sync: sync)
 
                 Text("Version \(version) (build \(build))")
@@ -45,5 +55,6 @@ struct PipelineView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showDex) { DexSheet(sync: sync) }
     }
 }

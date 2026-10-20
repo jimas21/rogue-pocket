@@ -180,6 +180,7 @@ final class SyncManager: ObservableObject {
     private let monitor = NWPathMonitor()
     private var online = false
     private var again = false
+    private var dexPushTask: Task<Void, Never>?
 
     private static let pairingKey = "syncPairing"
     private static let stateKey = "syncState"
@@ -303,6 +304,7 @@ final class SyncManager: ObservableObject {
             let (base, status) = try await reach(pairing, token: token)
             if allowDownloads { try await syncROM(base, token: token, rom: status.rom) }
             try await syncSave(base, token: token, nas: status.save, allowDownloads: allowDownloads)
+            try await syncDex(base, token: token, allowDownloads: allowDownloads)
             state.lastSync = Date()
             lastSync = state.lastSync
             persist()
@@ -478,6 +480,49 @@ final class SyncManager: ObservableObject {
         }
     }
 
+    // MARK: - Rogue Dex
+
+    /// The Dex page saved its state on the phone: push it to the NAS a few seconds later (edits come in bursts).
+    func dexStateChanged() {
+        dexPushTask?.cancel()
+        dexPushTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+            await sync("dex state", allowDownloads: false)
+        }
+    }
+
+    /// Keeps the phone's copy of the Dex page current, and its saved state in step with the NAS (newer updatedAt wins).
+    private func syncDex(_ base: URL, token: String, allowDownloads: Bool) async throws {
+        let store = DexStore.shared
+        if allowDownloads {
+            let (manifest, _) = try await request(base, "/v1/dex/manifest", token: token, timeout: 30)
+            let before = statusText
+            let changed = try await store.update(remoteManifest: manifest, fetch: { path in
+                try await self.fetchDexFile(base, token: token, path: path)
+            }, progress: { done, total in
+                self.statusText = "Updating the Rogue Dex (\(done) of \(total))..."
+            })
+            statusText = changed > 0 ? "Rogue Dex updated. \(before)" : before
+        }
+        let (remote, _) = try await request(base, "/v1/dex/state", token: token, timeout: 20)
+        if !store.adoptIfNewer(remote), DexStore.updatedAt(store.stateData()) > DexStore.updatedAt(remote) {
+            _ = try await request(base, "/v1/dex/state", method: "PUT", token: token, body: store.stateData(),
+                                  headers: ["Content-Type": "application/json"], timeout: 20)
+        }
+    }
+
+    private func fetchDexFile(_ base: URL, token: String, path: String) async throws -> Data {
+        var parts = URLComponents(url: base.appendingPathComponent("v1/dex/file"), resolvingAgainstBaseURL: false)
+        parts?.queryItems = [URLQueryItem(name: "path", value: path)]
+        guard let url = parts?.url else { throw SyncError.badData("Bad Dex file name: \(path)") }
+        var req = URLRequest(url: url, timeoutInterval: 30)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: req)
+        try check(response, data: data)
+        return data
+    }
+
     func decideLater() {
         choice = nil
         statusText = "Not synced: the saves differ. You'll be asked again next sync."
@@ -497,7 +542,9 @@ final class SyncManager: ObservableObject {
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
         if let body {
             req.httpBody = body
-            req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            if headers["Content-Type"] == nil {
+                req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            }
         }
         let (data, response) = try await session.data(for: req)
         let http = try check(response, data: data)
