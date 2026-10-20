@@ -10,10 +10,15 @@ final class DexHost: ObservableObject {
     private lazy var server = LocalDexServer(
         store: store,
         bridge: { [weak self] in self?.liveBridge() },
-        onStateChanged: { [weak self] in self?.stateChanged?() }
+        onStateChanged: { [weak self] in self?.stateChanged?() },
+        onBattle: { [weak self] on in
+            if self?.inBattle != on { self?.inBattle = on }
+        }
     )
     /// Called after the page saved its state, so the sync can push it to the NAS.
     var stateChanged: (() -> Void)?
+    /// What the last /battle answer said, from whichever Dex page asked (the strip asks every 2 s while it shows).
+    @Published private(set) var inBattle = false
 
     init(emulator: Emulator) {
         self.emulator = emulator
@@ -37,6 +42,57 @@ struct DexWebView: UIViewRepresentable {
         web.backgroundColor = UIColor(red: 0.086, green: 0.09, blue: 0.1, alpha: 1)
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.load(URLRequest(url: LocalDexServer.pageURL, cachePolicy: .reloadIgnoringLocalCacheData))
+        return web
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+
+/// The Dex's battle answer alone, for the strip under the picture: the Dex page on its Battle tab with everything
+/// but the answer card hidden, so the strip always says what the Dex says. It only reads: its storage is its own and
+/// its saves never leave the page, so it can never write an older state over the Dex panel's.
+struct DexAnswerView: UIViewRepresentable {
+    private static let readOnly = #"""
+    (function () {
+      var f = window.fetch.bind(window);
+      window.fetch = function (input, init) {
+        var m = ((init && init.method) || (input && input.method) || "GET").toUpperCase();
+        if (m !== "GET" && m !== "HEAD") return Promise.resolve(new Response("{}", { status: 200 }));
+        return f(input, init);
+      };
+    })();
+    """#
+
+    private static let answerOnly = #"""
+    (function () {
+      var s = document.createElement("style");
+      s.textContent =
+        "html,body{background:transparent!important;overflow:hidden!important}" +
+        "body *{visibility:hidden!important;pointer-events:none!important}" +
+        "#answer,#answer *{visibility:visible!important}" +
+        "#answer{position:fixed!important;left:0!important;top:0!important;width:100vw!important;" +
+        "height:100vh!important;margin:0!important;z-index:2147483647!important}" +
+        "#answer .ans{height:100%!important}";
+      document.head.appendChild(s);
+    })();
+    """#
+
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        config.userContentController.addUserScript(
+            WKUserScript(source: Self.readOnly, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        config.userContentController.addUserScript(
+            WKUserScript(source: Self.answerOnly, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        let web = WKWebView(frame: .zero, configuration: config)
+        web.isOpaque = false
+        web.backgroundColor = .clear
+        web.scrollView.isScrollEnabled = false
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        web.isUserInteractionEnabled = false
+        var page = URLComponents(url: LocalDexServer.pageURL, resolvingAgainstBaseURL: false)!
+        page.fragment = "battle"
+        web.load(URLRequest(url: page.url!, cachePolicy: .reloadIgnoringLocalCacheData))
         return web
     }
 

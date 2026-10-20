@@ -11,13 +11,17 @@ final class LocalDexServer {
     private let store: DexStore
     private let bridge: () -> LiveBridge?
     private let onStateChanged: () -> Void
+    private let onBattle: (Bool) -> Void
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "rogue-pocket.dex-server")
 
-    init(store: DexStore, bridge: @escaping () -> LiveBridge?, onStateChanged: @escaping () -> Void) {
+    /// `onBattle` is called on the main thread after every /battle answer: true while a battle is on.
+    init(store: DexStore, bridge: @escaping () -> LiveBridge?, onStateChanged: @escaping () -> Void,
+         onBattle: @escaping (Bool) -> Void) {
         self.store = store
         self.bridge = bridge
         self.onStateChanged = onStateChanged
+        self.onBattle = onBattle
     }
 
     /// Starts listening (again, after the app comes back from the background). Safe to call repeatedly. Main thread.
@@ -121,6 +125,10 @@ final class LocalDexServer {
             DispatchQueue.main.async {
                 let (code, body) = self.bridge()?.answer(path: req.path, query: req.query)
                     ?? (503, Data(#"{"error":"the live reader is not available"}"#.utf8))
+                if req.path == "/battle" {
+                    let obj = code == 200 ? (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] : nil
+                    self.onBattle(obj?["inBattle"] as? Bool ?? false)
+                }
                 self.queue.async { self.send(conn, code, body) }
             }
         case ("GET", _):

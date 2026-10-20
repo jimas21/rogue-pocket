@@ -7,6 +7,7 @@ import SwiftUI
 struct EmulatorScreen: View {
     @ObservedObject var emu: Emulator
     @ObservedObject var sync: SyncManager
+    @ObservedObject var dex: DexHost
     @Environment(\.dismiss) private var dismiss
     @AppStorage("showDebug") private var showDebug = false
     @AppStorage("ffSpeed") private var ffSpeed = 3
@@ -66,7 +67,7 @@ struct EmulatorScreen: View {
             Button {
                 showDex = true
             } label: {
-                DexStrip(sync: sync)
+                DexStrip(sync: sync, dex: dex)
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 10)
@@ -214,12 +215,29 @@ struct EmulatorScreen: View {
     }
 }
 
-/// The strip between the picture and the controls in portrait. The Rogue Dex card goes here; until then it shows
-/// what the sync is doing, so a pending save or an offline phone is visible while playing.
+/// The strip between the picture and the controls in portrait. In a battle it shows the Dex's answer card; otherwise
+/// what the sync is doing, so a pending save or an offline phone is visible while playing. Tapping it opens the Dex.
 private struct DexStrip: View {
     @ObservedObject var sync: SyncManager
+    @ObservedObject var dex: DexHost
 
     var body: some View {
+        let installed = dex.store.isInstalled
+        let answer = installed && dex.inBattle
+        ZStack {
+            if installed {
+                // Always loaded under the sync line, so its answer is ready the moment a battle starts.
+                DexAnswerView()
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .allowsHitTesting(false)
+            }
+            syncLine.opacity(answer ? 0 : 1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 64)
+        .animation(.easeInOut(duration: 0.25), value: answer)
+    }
+
+    private var syncLine: some View {
         HStack(spacing: 10) {
             Image(systemName: sync.paired ? "externaldrive.fill.badge.checkmark" : "externaldrive")
                 .foregroundStyle(sync.paired ? .green : .secondary)
