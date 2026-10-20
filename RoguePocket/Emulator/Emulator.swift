@@ -13,6 +13,8 @@ final class Emulator: ObservableObject {
     @Published private(set) var romName: String?
     @Published private(set) var debugText = ""
     @Published private(set) var benchText = ""
+    /// Fast forward is on (held or toggled from the pad). Speed comes from the "ffSpeed" setting (2-4x, default 3).
+    @Published private(set) var fastForward = false
     @Published var muted = false {
         didSet { audio.setMuted(muted) }
     }
@@ -343,6 +345,7 @@ final class Emulator: ObservableObject {
         audio.pause()
         core?.setKeys([])
         core?.flushSave()
+        fastForward = false
     }
 
     // MARK: - The clock
@@ -353,7 +356,8 @@ final class Emulator: ObservableObject {
         var dt = lastTimestamp == 0 ? Emulator.frameDuration : now - lastTimestamp
         lastTimestamp = now
         if dt > 0.1 { dt = 0.1 } // after a stall, do not try to catch up
-        accumulator += dt
+        let speed = fastForward ? Double(Emulator.fastSpeed) : 1
+        accumulator += dt * speed
         winTicks += 1
 
         let keys = touchKeys.union(padKeys)
@@ -361,28 +365,43 @@ final class Emulator: ObservableObject {
         winKeysSent.formUnion(keys)
         winKeysCore.formUnion(core.keys)
         var ran = 0
-        while accumulator >= Emulator.frameDuration && ran < 4 {
+        let maxFrames = 4 * Int(speed)
+        while accumulator >= Emulator.frameDuration && ran < maxFrames {
             let start = CACurrentMediaTime()
             core.runFrame()
             let ms = (CACurrentMediaTime() - start) * 1000.0
-            pumpAudio(core)
+            pumpAudio(core, play: !fastForward) // sped-up sound is noise: drain it silently
             winFrames += 1
             winRunSum += ms
             if ms > winRunMax { winRunMax = ms }
             accumulator -= Emulator.frameDuration
             ran += 1
         }
-        if ran == 4 { accumulator = 0 }
+        if ran == maxFrames { accumulator = 0 }
         if ran > 0 { screen?.present(pixels: core.pixels) }
         updateStats(core, now: now)
     }
 
-    /// Moves everything the core produced this frame into the audio ring.
-    private func pumpAudio(_ core: MGBACore) {
+    /// Moves everything the core produced this frame into the audio ring (or drops it, during fast forward).
+    private func pumpAudio(_ core: MGBACore, play: Bool = true) {
         while true {
             let n = core.readAudio(into: audioScratch, maxFrames: Emulator.scratchFrames)
             if n == 0 { break }
-            audio.push(audioScratch, frames: n, rate: core.audioRate)
+            if play { audio.push(audioScratch, frames: n, rate: core.audioRate) }
+        }
+    }
+
+    static var fastSpeed: Int {
+        let v = UserDefaults.standard.integer(forKey: "ffSpeed")
+        return v == 0 ? 3 : max(2, min(4, v))
+    }
+
+    func setFastForward(_ on: Bool) {
+        guard on != fastForward else { return }
+        fastForward = on
+        if !on {
+            audio.flush()
+            accumulator = 0
         }
     }
 

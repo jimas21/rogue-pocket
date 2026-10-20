@@ -11,6 +11,7 @@ struct PadElement {
     enum Kind {
         case button(GBAKeys, String, round: Bool)
         case dpad
+        case fastForward
     }
 
     let kind: Kind
@@ -20,6 +21,10 @@ struct PadElement {
     static func button(_ keys: GBAKeys, _ label: String, x: CGFloat, y: CGFloat, w: CGFloat = 64, h: CGFloat = 64,
                        round: Bool = true) -> PadElement {
         PadElement(kind: .button(keys, label, round: round), center: CGPoint(x: x, y: y), size: CGSize(width: w, height: h))
+    }
+
+    static func fastForward(x: CGFloat, y: CGFloat) -> PadElement {
+        PadElement(kind: .fastForward, center: CGPoint(x: x, y: y), size: CGSize(width: 56, height: 32))
     }
 
     static func dpad(x: CGFloat, y: CGFloat, side: CGFloat = 150) -> PadElement {
@@ -32,6 +37,7 @@ enum PadLayout {
     static let portrait: [PadElement] = [
         .button(.l, "L", x: 0.14, y: 0.09, w: 92, h: 38, round: false),
         .button(.r, "R", x: 0.86, y: 0.09, w: 92, h: 38, round: false),
+        .fastForward(x: 0.5, y: 0.09),
         .dpad(x: 0.25, y: 0.48),
         .button(.a, "A", x: 0.86, y: 0.40),
         .button(.b, "B", x: 0.68, y: 0.56),
@@ -48,6 +54,7 @@ enum PadLayout {
 
     static let landscapeRight: [PadElement] = [
         .button(.r, "R", x: 0.5, y: 0.12, w: 92, h: 38, round: false),
+        .fastForward(x: 0.5, y: 0.25),
         .button(.a, "A", x: 0.72, y: 0.43, w: 60, h: 60),
         .button(.b, "B", x: 0.30, y: 0.61, w: 60, h: 60),
         .button(.start, "Start", x: 0.5, y: 0.90, w: 74, h: 30),
@@ -66,6 +73,7 @@ struct ControllerPad: UIViewRepresentable {
         let emu = emulator
         let source = layoutID
         view.onKeys = { keys in emu.setTouchKeys(keys, from: source) }
+        view.onFastForward = { on in emu.setFastForward(on) }
         return view
     }
 
@@ -80,6 +88,8 @@ struct ControllerPad: UIViewRepresentable {
 
 final class ControllerView: UIView {
     var onKeys: ((GBAKeys) -> Void)?
+    /// Fast forward: a quick tap toggles it, a hold runs it only while held.
+    var onFastForward: ((Bool) -> Void)?
 
     private var elements: [PadElement] = []
     private var layoutID = ""
@@ -121,6 +131,16 @@ final class ControllerView: UIView {
                 b.font = .systemFont(ofSize: label.count > 1 ? 15 : 20, weight: .bold)
                 b.backgroundColor = Self.idle
                 b.layer.cornerRadius = round ? element.size.height / 2 : 12
+                b.layer.masksToBounds = true
+                v = b
+            case .fastForward:
+                let b = UILabel()
+                b.text = "\u{25B6}\u{25B6}"
+                b.textAlignment = .center
+                b.textColor = .white
+                b.font = .systemFont(ofSize: 12, weight: .heavy)
+                b.backgroundColor = Self.idle
+                b.layer.cornerRadius = element.size.height / 2
                 b.layer.masksToBounds = true
                 v = b
             case .dpad:
@@ -178,7 +198,12 @@ final class ControllerView: UIView {
     private enum Binding {
         case dpad(CGRect)
         case buttons
+        case fastForward(Date)
     }
+
+    private var ffLatched = false
+    private var ffHeld = false
+    private var ffShown = false
 
     private var bindings: [ObjectIdentifier: Binding] = [:]
 
@@ -187,7 +212,11 @@ final class ControllerView: UIView {
         for t in touches {
             let p = t.location(in: self)
             let id = ObjectIdentifier(t)
-            if let pad = dpadFrame(near: p) {
+            if fastForwardHit(p) {
+                bindings[id] = .fastForward(Date())
+                ffHeld = true
+                touchKeys[id] = []
+            } else if let pad = dpadFrame(near: p) {
                 bindings[id] = .dpad(pad)
                 touchKeys[id] = direction(at: p, in: pad)
             } else {
@@ -204,6 +233,7 @@ final class ControllerView: UIView {
             let id = ObjectIdentifier(t)
             switch bindings[id] {
             case .dpad(let pad): touchKeys[id] = direction(at: p, in: pad)
+            case .fastForward: break
             default: touchKeys[id] = button(at: p)
             }
         }
@@ -220,6 +250,10 @@ final class ControllerView: UIView {
 
     private func lift(_ touches: Set<UITouch>) {
         for t in touches {
+            if case .fastForward(let began) = bindings[ObjectIdentifier(t)] {
+                ffHeld = false
+                if Date().timeIntervalSince(began) < 0.3 { ffLatched.toggle() } // a tap toggles; a hold was momentary
+            }
             touchKeys[ObjectIdentifier(t)] = nil
             bindings[ObjectIdentifier(t)] = nil
         }
@@ -229,7 +263,16 @@ final class ControllerView: UIView {
     func releaseAll() {
         touchKeys = [:]
         bindings = [:]
+        ffHeld = false
+        ffLatched = false
         publish()
+    }
+
+    private func fastForwardHit(_ p: CGPoint) -> Bool {
+        elements.contains { element in
+            guard case .fastForward = element.kind else { return false }
+            return frame(of: element).insetBy(dx: -10, dy: -10).contains(p)
+        }
     }
 
     /// The D-pad catches a touch anywhere in a generous zone around it (40 pt beyond its drawn edge), unless the point
@@ -277,6 +320,15 @@ final class ControllerView: UIView {
     }
 
     private func publish() {
+        let ff = ffHeld || ffLatched
+        if ff != ffShown {
+            ffShown = ff
+            for (element, v) in zip(elements, views) {
+                if case .fastForward = element.kind { v.backgroundColor = ff ? Self.lit : Self.idle }
+            }
+            if ff { haptic.impactOccurred() }
+            onFastForward?(ff)
+        }
         let now = touchKeys.values.reduce(into: GBAKeys()) { $0.formUnion($1) }
         guard now != pressed else { return }
         if !now.isEmpty, now != pressed { haptic.impactOccurred() } // also on each D-pad direction change

@@ -9,6 +9,7 @@ struct EmulatorScreen: View {
     @ObservedObject var sync: SyncManager
     @Environment(\.dismiss) private var dismiss
     @AppStorage("showDebug") private var showDebug = false
+    @AppStorage("ffSpeed") private var ffSpeed = 3
     @State private var sheet: Sheet?
 
     /// Width of each control column in landscape.
@@ -96,6 +97,17 @@ struct EmulatorScreen: View {
             .overlay(alignment: .topTrailing) {
                 gameMenu.padding(6)
             }
+            .overlay(alignment: .topLeading) {
+                if emu.fastForward {
+                    Text("\u{25B6}\u{25B6} \(ffSpeed)x")
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.green.opacity(0.75), in: Capsule())
+                        .padding(8)
+                }
+            }
     }
 
     private var infoBlock: some View {
@@ -127,6 +139,14 @@ struct EmulatorScreen: View {
                 Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
             }
             Toggle(isOn: $emu.muted) { Label("Mute", systemImage: "speaker.slash") }
+            Picker(selection: $ffSpeed) {
+                Text("2x").tag(2)
+                Text("3x").tag(3)
+                Text("4x").tag(4)
+            } label: {
+                Label("Fast forward speed", systemImage: "forward.fill")
+            }
+            .pickerStyle(.menu)
             Divider()
             Button("Reset game") { emu.reset() }
             Menu("Files") {
