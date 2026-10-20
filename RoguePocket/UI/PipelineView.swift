@@ -4,6 +4,7 @@ import SwiftUI
 struct PipelineView: View {
     @ObservedObject var emulator: Emulator
     @ObservedObject var sync: SyncManager
+    let play: () -> Void
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -20,9 +21,7 @@ struct PipelineView: View {
                     .font(.largeTitle.bold())
                     .padding(.top, 24)
 
-                NavigationLink {
-                    EmulatorScreen(emu: emulator)
-                } label: {
+                Button(action: play) {
                     Label("Play", systemImage: "gamecontroller.fill")
                         .font(.title3.bold())
                         .frame(maxWidth: 280)

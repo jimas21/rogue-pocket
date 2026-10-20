@@ -1,9 +1,18 @@
 import SwiftUI
 
-/// The spike's test screen: game picture, debug numbers, touch controls, and a File menu.
+/// The game, full screen (presented as a cover: no back-swipe for a thumb on the D-pad to trigger by accident).
+/// Portrait: picture across the full width, the Dex strip, then the controls. Landscape: the biggest picture that
+/// still leaves room for a control column on each side INSIDE the safe area, so nothing sits under the Dynamic
+/// Island (it is a hole in the screen; touches there never register) or over the picture.
 struct EmulatorScreen: View {
     @ObservedObject var emu: Emulator
+    @ObservedObject var sync: SyncManager
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("showDebug") private var showDebug = false
     @State private var sheet: Sheet?
+
+    /// Width of each control column in landscape.
+    private static let sideColumn: CGFloat = 128
 
     enum Sheet: Identifiable {
         case rom
@@ -25,28 +34,128 @@ struct EmulatorScreen: View {
         GeometryReader { geo in
             Group {
                 if geo.size.width > geo.size.height {
-                    landscape
+                    landscape(geo.size)
                 } else {
                     portrait
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+        .ignoresSafeArea(edges: .bottom) // the controls may use the home-indicator strip; that swipe is deferred
         .background(Color.black.ignoresSafeArea())
-        .navigationTitle("Emulator")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.black, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { fileMenu }
+        .sheet(item: $sync.choice) { choice in
+            SaveChoiceView(choice: choice, sync: sync)
         }
+        .background(fileSheets) // the file sheets hang off their own view (one .sheet per view)
         // Touches near the screen edges go to the controls first, not to the Home/notification swipes.
         .defersSystemGestures(on: .all)
         .persistentSystemOverlays(.hidden)
+        .statusBarHidden()
         .onAppear { emu.screenDidAppear() }
         .onDisappear { emu.screenDidDisappear() }
-        .sheet(item: $sheet) { item in
+    }
+
+    // MARK: layouts
+
+    private var portrait: some View {
+        VStack(spacing: 8) {
+            picture
+            DexStrip(sync: sync)
+                .padding(.horizontal, 10)
+            ControllerPad(elements: PadLayout.portrait, layoutID: "portrait", emulator: emu)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(.bottom, 6)
+    }
+
+    private func landscape(_ size: CGSize) -> some View {
+        let pictureWidth = max(240, min(size.width - 2 * Self.sideColumn, size.height * 1.5))
+        let side = (size.width - pictureWidth) / 2
+        return HStack(spacing: 0) {
+            ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu)
+                .frame(width: side)
+            picture
+                .frame(width: pictureWidth)
+            ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu)
+                .frame(width: side)
+        }
+    }
+
+    private var picture: some View {
+        GameScreen(emulator: emu)
+            .aspectRatio(240.0 / 160.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .bottomLeading) {
+                if showDebug {
+                    infoBlock
+                        .padding(6)
+                        .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+                        .padding(4)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                gameMenu.padding(6)
+            }
+    }
+
+    private var infoBlock: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(emu.debugText.isEmpty ? "(debug line appears once a game runs)" : emu.debugText)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+            if !emu.benchText.isEmpty {
+                Text(emu.benchText)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.yellow)
+            }
+            Text(emu.status)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.75))
+        }
+    }
+
+    private var gameMenu: some View {
+        Menu {
+            Button {
+                dismiss()
+            } label: {
+                Label("Home", systemImage: "house")
+            }
+            Button {
+                Task { await sync.sync("menu") }
+            } label: {
+                Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
+            }
+            Toggle(isOn: $emu.muted) { Label("Mute", systemImage: "speaker.slash") }
+            Divider()
+            Button("Reset game") { emu.reset() }
+            Menu("Files") {
+                Button("Load ROM...") { sheet = .rom }
+                ForEach(emu.localROMs(), id: \.self) { url in
+                    Button("Open \(url.lastPathComponent)") { emu.openLocal(url) }
+                }
+                Divider()
+                Button("Import save...") { sheet = .save }
+                Button("Export save...") {
+                    if let url = emu.exportSaveCopy() { sheet = .export(url) }
+                }
+            }
+            Menu("Debug") {
+                Toggle("Show debug info", isOn: $showDebug)
+                Button("Benchmark (advances the game 10 s)") { emu.runBenchmark() }
+                Button("mGBA log and help") { sheet = .log }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(.black.opacity(0.45), in: Circle())
+        }
+    }
+
+    private var fileSheets: some View {
+        Color.clear.sheet(item: $sheet) { item in
             switch item {
             case .rom:
                 OpenFilePicker(
@@ -71,73 +180,34 @@ struct EmulatorScreen: View {
             }
         }
     }
+}
 
-    // MARK: layouts
+/// The strip between the picture and the controls in portrait. The Rogue Dex card goes here; until then it shows
+/// what the sync is doing, so a pending save or an offline phone is visible while playing.
+private struct DexStrip: View {
+    @ObservedObject var sync: SyncManager
 
-    private var portrait: some View {
-        VStack(spacing: 8) {
-            GameScreen(emulator: emu)
-                .aspectRatio(240.0 / 160.0, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-            infoBlock
-                .padding(.horizontal, 12)
-            ControllerPad(elements: PadLayout.portrait, layoutID: "portrait", emulator: emu)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .padding(.bottom, 4)
-    }
-
-    private var landscape: some View {
-        HStack(spacing: 0) {
-            ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu)
-                .frame(minWidth: 150, maxWidth: .infinity, maxHeight: .infinity)
-            VStack(spacing: 4) {
-                GameScreen(emulator: emu)
-                    .aspectRatio(240.0 / 160.0, contentMode: .fit)
-                infoBlock
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: sync.paired ? "externaldrive.fill.badge.checkmark" : "externaldrive")
+                .foregroundStyle(sync.paired ? .green : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(sync.statusText)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(2)
+                if let last = sync.lastSync {
+                    Text("Synced \(last.formatted(.relative(presentation: .named)))")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.5))
+                }
             }
-            .layoutPriority(1)
-            ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu)
-                .frame(minWidth: 150, maxWidth: .infinity, maxHeight: .infinity)
+            Spacer(minLength: 0)
+            if sync.syncing { ProgressView().tint(.white) }
         }
-    }
-
-    private var infoBlock: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(emu.debugText.isEmpty ? "(debug line appears once a game runs)" : emu.debugText)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.85))
-            if !emu.benchText.isEmpty {
-                Text(emu.benchText)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.yellow)
-            }
-            Text(emu.status)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.7))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var fileMenu: some View {
-        Menu {
-            Button("Load ROM...") { sheet = .rom }
-            ForEach(emu.localROMs(), id: \.self) { url in
-                Button("Open \(url.lastPathComponent)") { emu.openLocal(url) }
-            }
-            Divider()
-            Button("Import save...") { sheet = .save }
-            Button("Export save...") {
-                if let url = emu.exportSaveCopy() { sheet = .export(url) }
-            }
-            Divider()
-            Button("Reset game") { emu.reset() }
-            Button("Benchmark (advances the game 10 s)") { emu.runBenchmark() }
-            Toggle("Mute", isOn: $emu.muted)
-            Button("mGBA log and help") { sheet = .log }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .background(Color(red: 0.12, green: 0.15, blue: 0.2), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

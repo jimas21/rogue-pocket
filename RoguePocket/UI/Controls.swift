@@ -42,14 +42,14 @@ enum PadLayout {
     /// Landscape: a pad on each side of the picture.
     static let landscapeLeft: [PadElement] = [
         .button(.l, "L", x: 0.5, y: 0.12, w: 92, h: 38, round: false),
-        .dpad(x: 0.5, y: 0.54, side: 140),
+        .dpad(x: 0.5, y: 0.53, side: 140),
         .button(.select, "Select", x: 0.5, y: 0.90, w: 74, h: 30),
     ]
 
     static let landscapeRight: [PadElement] = [
         .button(.r, "R", x: 0.5, y: 0.12, w: 92, h: 38, round: false),
-        .button(.a, "A", x: 0.70, y: 0.44),
-        .button(.b, "B", x: 0.32, y: 0.62),
+        .button(.a, "A", x: 0.72, y: 0.43, w: 60, h: 60),
+        .button(.b, "B", x: 0.30, y: 0.61, w: 60, h: 60),
         .button(.start, "Start", x: 0.5, y: 0.90, w: 74, h: 30),
     ]
 }
