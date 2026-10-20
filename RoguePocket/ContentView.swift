@@ -6,6 +6,7 @@ struct ContentView: View {
     @StateObject private var emulator: Emulator
     @StateObject private var sync: SyncManager
     @Environment(\.scenePhase) private var scenePhase
+    @State private var playing = false
 
     init() {
         let emu = Emulator()
@@ -15,7 +16,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            PipelineView(emulator: emulator, sync: sync)
+            PipelineView(emulator: emulator, sync: sync, play: { playing = true })
         }
         .onOpenURL { url in
             sync.handle(url: url)
@@ -28,7 +29,11 @@ struct ContentView: View {
             default: break
             }
         }
-        .sheet(item: $sync.choice) { choice in
+        .fullScreenCover(isPresented: $playing) {
+            EmulatorScreen(emu: emulator, sync: sync)
+        }
+        // While the game is up, EmulatorScreen shows the save prompt itself (a cover hides sheets from below).
+        .sheet(item: playing ? .constant(nil) : $sync.choice) { choice in
             SaveChoiceView(choice: choice, sync: sync)
         }
     }
