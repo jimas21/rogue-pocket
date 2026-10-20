@@ -27,6 +27,8 @@ final class TypeData {
     private let moveType: [Int]
     private let moveIsStatus: [Bool]
     private let moveName: [String]
+    /// Species id -> its types, for an Illusion disguise (the game shows the disguise's species types).
+    let speciesTypes: [Int: [Int]]
 
     /// Moves whose type depends on the user, the weather or the terrain: no tag rather than a wrong one.
     private static let variableType: Set<String> = [
@@ -45,6 +47,11 @@ final class TypeData {
         moveName = moves.map { $0.first as? String ?? "" }
         moveType = moves.map { $0.count > 1 ? ($0[1] as? Int ?? -1) : -1 }
         moveIsStatus = moves.map { $0.count > 6 ? ($0[6] as? Int ?? 2) == 2 : true }
+        var types: [Int: [Int]] = [:]
+        for sp in obj["species"] as? [[String: Any]] ?? [] {
+            if let id = sp["id"] as? Int, let t = sp["types"] as? [Int] { types[id] = t }
+        }
+        speciesTypes = types
     }
 
     /// Damage multiplier of an attacking type against a battler's types (the game skips a repeated type and an
@@ -109,7 +116,7 @@ enum BattleReader {
         if u32(slot, 0) != u32(enemy, 76) { return previous }
 
         var state = BattleOverlayState()
-        let types = [Int(enemy[34]), Int(enemy[35]), Int(enemy[36])]
+        var types = [Int(enemy[34]), Int(enemy[35]), Int(enemy[36])]
 
         // The enemy's HP box: its sprite must be in use, shown, and owned by battler 1 (at a battle's start the id
         // slots still point at the previous scene's sprites).
@@ -123,22 +130,22 @@ enum BattleReader {
             }
         }
 
-        // Illusion: the game shows the disguise's types, and the real ones would give it away. Show nothing.
-        var disguised = false
+        // Illusion: while it holds, the game rates moves against the disguise's species types, so the overlay does
+        // too. Hiding anything would itself give the disguise away.
         if let ptr = core.readMemory(address: battleStructPtr, length: 4).map({ u32($0, 0) }),
-           let il = core.readMemory(address: ptr &+ 660 &+ 8, length: 4) {
-            disguised = il[0] != 0 && il[1] != 0 && il[2] == 0
+           let il = core.readMemory(address: ptr &+ 660 &+ 8, length: 4),
+           il[0] != 0, il[1] != 0, il[2] == 0, Int(il[3]) < 6,
+           let shown = partySpecies(core, slot: Int(il[3])), let disguise = data.speciesTypes[shown] {
+            types = disguise
         }
-        if !disguised {
-            state.weaknesses = (0..<19).compactMap { t -> BattleOverlayState.Weakness? in
-                guard t != 9 else { return nil }
-                let m = data.multiplier(t, against: types)
-                return m > 1 ? .init(type: t, multiplier: m) : nil
-            }.sorted { $0.multiplier != $1.multiplier ? $0.multiplier > $1.multiplier : $0.type < $1.type }
-        }
+        state.weaknesses = (0..<19).compactMap { t -> BattleOverlayState.Weakness? in
+            guard t != 9 else { return nil }
+            let m = data.multiplier(t, against: types)
+            return m > 1 ? .init(type: t, multiplier: m) : nil
+        }.sorted { $0.multiplier != $1.multiplier ? $0.multiplier > $1.multiplier : $0.type < $1.type }
 
         // The move menu (battler 0 in singles): every damaging move gets its multiplier against the enemy.
-        if !disguised, let funcs = core.readMemory(address: controllerFuncs, length: 4), u32(funcs, 0) == handleInputChooseMove {
+        if let funcs = core.readMemory(address: controllerFuncs, length: 4), u32(funcs, 0) == handleInputChooseMove {
             let mine = Array(mons[0..<96])
             for i in 0..<4 {
                 let move = Int(u16(mine, 12 + 2 * i))
@@ -148,6 +155,30 @@ enum BattleReader {
             }
         }
         return state
+    }
+
+    /// Substruct order (growth, attacks, EVs, misc) by personality % 24.
+    private static let substructOrder: [[Int]] = [
+        [0, 1, 2, 3], [0, 1, 3, 2], [0, 2, 1, 3], [0, 3, 1, 2], [0, 2, 3, 1], [0, 3, 2, 1], [1, 0, 2, 3], [1, 0, 3, 2],
+        [2, 0, 1, 3], [3, 0, 1, 2], [2, 0, 3, 1], [3, 0, 2, 1], [1, 2, 0, 3], [1, 3, 0, 2], [2, 1, 0, 3], [3, 1, 0, 2],
+        [2, 3, 0, 1], [3, 2, 0, 1], [1, 2, 3, 0], [1, 3, 2, 0], [2, 1, 3, 0], [3, 1, 2, 0], [2, 3, 1, 0], [3, 2, 1, 0],
+    ]
+
+    /// The species of an enemy party member: decrypts its growth substruct (same rules as the live reader).
+    private static func partySpecies(_ core: MGBACore, slot: Int) -> Int? {
+        guard let b = core.readMemory(address: enemyParty + UInt32(slot * 104), length: 80) else { return nil }
+        let personality = u32(b, 0), key = personality ^ u32(b, 4)
+        var secure = [UInt8](repeating: 0, count: 48)
+        for i in 0..<12 {
+            let w = u32(b, 32 + i * 4) ^ key
+            for k in 0..<4 { secure[i * 4 + k] = UInt8((w >> (8 * UInt32(k))) & 0xFF) }
+        }
+        var sum: UInt32 = 0
+        for j in 0..<24 { sum &+= UInt32(u16(secure, j * 2)) }
+        guard UInt16(sum & 0xFFFF) == u16(b, 28) else { return nil }
+        let growth = substructOrder[Int(personality % 24)][0] * 12
+        let species = Int(u32(secure, growth) & 0x7FF)
+        return species > 0 ? species : nil
     }
 
     private static func u16(_ b: [UInt8], _ o: Int) -> UInt16 { UInt16(b[o]) | UInt16(b[o + 1]) << 8 }
