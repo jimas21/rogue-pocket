@@ -65,8 +65,9 @@ final class AudioOutput {
         wantsRunning = true
         let session = AVAudioSession.sharedInstance()
         do {
-            // .playback ignores the silent switch on purpose: a muted phone would look like "no sound" in a test.
-            try session.setCategory(.playback, mode: .default)
+            // .playback plays with the silent switch on; .mixWithOthers never stops another app's audio
+            // (an audiobook or music keeps playing under the game).
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
             NSLog("RoguePocket audio: session setup failed: \(error)")

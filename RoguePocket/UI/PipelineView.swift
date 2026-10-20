@@ -22,7 +22,15 @@ struct PipelineView: View {
                     .font(.largeTitle.bold())
                     .padding(.top, 24)
 
-                Button(action: play) {
+                Button {
+                    // The Dex panel is a sheet: close it first, or the game can't open over it.
+                    if showDex {
+                        showDex = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { play() }
+                    } else {
+                        play()
+                    }
+                } label: {
                     Label("Play", systemImage: "gamecontroller.fill")
                         .font(.title3.bold())
                         .frame(maxWidth: 280)

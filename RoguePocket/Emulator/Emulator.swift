@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import GameController
 import SwiftUI
@@ -16,8 +17,14 @@ final class Emulator: ObservableObject {
     /// Fast forward is on (held or toggled from the pad). Speed comes from the "ffSpeed" setting (2-4x, default 3).
     @Published private(set) var fastForward = false
     @Published var muted = false {
-        didSet { audio.setMuted(muted) }
+        didSet {
+            audio.setMuted(muted)
+            if !settingAutoMute { autoMuted = false } // the player chose; stop following other apps
+        }
     }
+    /// Muted because another app was playing (an audiobook, music); unmutes when that stops.
+    private var autoMuted = false
+    private var settingAutoMute = false
 
     weak var screen: GameScreenView?
     private(set) var core: MGBACore?
@@ -63,6 +70,27 @@ final class Emulator: ObservableObject {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         observeControllers()
+        NotificationCenter.default.addObserver(forName: AVAudioSession.silenceSecondaryAudioHintNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.followOtherAudio()
+        }
+    }
+
+    /// Game sound steps aside while another app plays audio, and comes back when it stops (unless the player
+    /// set Mute themselves).
+    func followOtherAudio() {
+        let other = AVAudioSession.sharedInstance().isOtherAudioPlaying
+        if other && !muted {
+            settingAutoMute = true
+            muted = true
+            settingAutoMute = false
+            autoMuted = true
+        } else if !other && autoMuted {
+            settingAutoMute = true
+            muted = false
+            settingAutoMute = false
+            autoMuted = false
+        }
     }
 
     deinit {
@@ -336,6 +364,7 @@ final class Emulator: ObservableObject {
         resetClock()
         audio.flush()
         audio.start()
+        followOtherAudio()
     }
 
     private func stopLink() {
