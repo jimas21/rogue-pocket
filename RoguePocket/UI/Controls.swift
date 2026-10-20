@@ -173,51 +173,105 @@ final class ControllerView: UIView {
 
     // MARK: touches
 
+    /// What a finger is bound to. A finger that lands on (or near) the D-pad stays the D-pad until it lifts, however
+    /// far the thumb drifts, so a rolling thumb never drops the direction. Other fingers can slide between buttons.
+    private enum Binding {
+        case dpad(CGRect)
+        case buttons
+    }
+
+    private var bindings: [ObjectIdentifier: Binding] = [:]
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         haptic.prepare()
-        for t in touches { touchKeys[ObjectIdentifier(t)] = keys(at: t.location(in: self)) }
+        for t in touches {
+            let p = t.location(in: self)
+            let id = ObjectIdentifier(t)
+            if let pad = dpadFrame(near: p) {
+                bindings[id] = .dpad(pad)
+                touchKeys[id] = direction(at: p, in: pad)
+            } else {
+                bindings[id] = .buttons
+                touchKeys[id] = button(at: p)
+            }
+        }
         publish()
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches { touchKeys[ObjectIdentifier(t)] = keys(at: t.location(in: self)) }
+        for t in touches {
+            let p = t.location(in: self)
+            let id = ObjectIdentifier(t)
+            switch bindings[id] {
+            case .dpad(let pad): touchKeys[id] = direction(at: p, in: pad)
+            default: touchKeys[id] = button(at: p)
+            }
+        }
         publish()
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches { touchKeys[ObjectIdentifier(t)] = nil }
-        publish()
+        lift(touches)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches { touchKeys[ObjectIdentifier(t)] = nil }
+        lift(touches)
+    }
+
+    private func lift(_ touches: Set<UITouch>) {
+        for t in touches {
+            touchKeys[ObjectIdentifier(t)] = nil
+            bindings[ObjectIdentifier(t)] = nil
+        }
         publish()
     }
 
     func releaseAll() {
         touchKeys = [:]
+        bindings = [:]
         publish()
     }
 
-    /// The keys under one finger: the D-pad direction (dominant axis, small dead zone), or the nearest button whose
-    /// slightly enlarged frame contains the point.
-    private func keys(at p: CGPoint) -> GBAKeys {
+    /// The D-pad catches a touch anywhere in a generous zone around it (40 pt beyond its drawn edge), unless the point
+    /// is clearly on a button.
+    private func dpadFrame(near p: CGPoint) -> CGRect? {
+        for element in elements {
+            guard case .dpad = element.kind else { continue }
+            let f = frame(of: element)
+            if f.insetBy(dx: -40, dy: -40).contains(p), button(at: p, slack: 0).isEmpty { return f }
+        }
+        return nil
+    }
+
+    /// Direction from the D-pad's centre. Eight ways, but the diagonals are narrow (30 degrees each) so a thumb
+    /// aimed at a cardinal direction stays cardinal; a small dead zone in the middle presses nothing.
+    private func direction(at p: CGPoint, in pad: CGRect) -> GBAKeys {
+        let dx = p.x - pad.midX
+        let dy = p.y - pad.midY
+        if hypot(dx, dy) < pad.width * 0.09 { return [] }
+        var angle = atan2(-dy, dx) * 180 / .pi // 0 = right, 90 = up
+        if angle < 0 { angle += 360 }
+        switch angle {
+        case 0..<30, 330..<360: return .right
+        case 30..<60: return [.up, .right]
+        case 60..<120: return .up
+        case 120..<150: return [.up, .left]
+        case 150..<210: return .left
+        case 210..<240: return [.down, .left]
+        case 240..<300: return .down
+        default: return [.down, .right]
+        }
+    }
+
+    /// The nearest button whose enlarged frame contains the point.
+    private func button(at p: CGPoint, slack: CGFloat = 16) -> GBAKeys {
         var best: (keys: GBAKeys, distance: CGFloat)?
         for element in elements {
+            guard case .button(let k, _, _) = element.kind else { continue }
             let f = frame(of: element)
-            switch element.kind {
-            case .dpad:
-                guard f.insetBy(dx: -24, dy: -24).contains(p) else { continue }
-                let dx = p.x - f.midX
-                let dy = p.y - f.midY
-                if max(abs(dx), abs(dy)) < f.width * 0.12 { return [] }
-                if abs(dx) > abs(dy) { return dx > 0 ? .right : .left }
-                return dy > 0 ? .down : .up
-            case .button(let k, _, _):
-                guard f.insetBy(dx: -14, dy: -14).contains(p) else { continue }
-                let d = hypot(p.x - f.midX, p.y - f.midY)
-                if best == nil || d < best!.distance { best = (k, d) }
-            }
+            guard f.insetBy(dx: -slack, dy: -slack).contains(p) else { continue }
+            let d = hypot(p.x - f.midX, p.y - f.midY)
+            if best == nil || d < best!.distance { best = (k, d) }
         }
         return best?.keys ?? []
     }
@@ -225,7 +279,7 @@ final class ControllerView: UIView {
     private func publish() {
         let now = touchKeys.values.reduce(into: GBAKeys()) { $0.formUnion($1) }
         guard now != pressed else { return }
-        if !now.subtracting(pressed).isEmpty { haptic.impactOccurred() }
+        if !now.isEmpty, now != pressed { haptic.impactOccurred() } // also on each D-pad direction change
         pressed = now
         for (element, v) in zip(elements, views) {
             if case .button(let k, _, _) = element.kind {
