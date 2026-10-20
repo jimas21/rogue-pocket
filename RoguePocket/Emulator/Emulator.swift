@@ -47,7 +47,7 @@ final class Emulator: ObservableObject {
     private var touchKeys: GBAKeys = []
     private var padKeys: GBAKeys = []
 
-    private var romURL: URL?
+    private(set) var romURL: URL?
     private let audioScratch: UnsafeMutablePointer<Int16>
 
     init() {
@@ -166,6 +166,71 @@ final class Emulator: ObservableObject {
             status = "Could not export the save: \(error.localizedDescription)"
             return nil
         }
+    }
+
+    // MARK: - Sync hooks (SyncManager)
+
+    var romsDirectory: URL { romsDir }
+
+    /// A game is on screen and running (not just loaded).
+    var isPlaying: Bool { link != nil }
+
+    /// The ROM the game screen opens by default.
+    func preferROM(named name: String) {
+        UserDefaults.standard.set(name, forKey: Emulator.lastROMKey)
+    }
+
+    /// The save bytes for a ROM in ROMs/, flushed first if that game is loaded. nil if there is no save yet.
+    func saveData(forROMNamed name: String, flush: Bool) -> Data? {
+        if flush, romURL?.lastPathComponent == name { core?.flushSave() }
+        return try? Data(contentsOf: saveURL(for: romsDir.appendingPathComponent(name)))
+    }
+
+    func saveDate(forROMNamed name: String) -> Date? {
+        let url = saveURL(for: romsDir.appendingPathComponent(name))
+        return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+    }
+
+    /// Lets go of a ROM file so it can be replaced. Refuses (false) while that game is being played.
+    func releaseROM(named name: String) -> Bool {
+        guard core != nil, romURL?.lastPathComponent == name else { return true }
+        if isPlaying { return false }
+        closeCore()
+        return true
+    }
+
+    /// Replaces the save for a ROM in ROMs/ (keeping the old one in Saves/Backups), restarting that game if loaded.
+    func replaceSave(forROMNamed name: String, with data: Data, tag: String) throws {
+        let rom = romsDir.appendingPathComponent(name)
+        let wasOpen = core != nil && romURL?.lastPathComponent == name
+        if wasOpen { closeCore() }
+        let fm = FileManager.default
+        try fm.createDirectory(at: savesDir, withIntermediateDirectories: true)
+        let dest = saveURL(for: rom)
+        if fm.fileExists(atPath: dest.path) {
+            let backups = savesDir.appendingPathComponent("Backups", isDirectory: true)
+            try fm.createDirectory(at: backups, withIntermediateDirectories: true)
+            let stamp = DateFormatter()
+            stamp.dateFormat = "yyyyMMdd-HHmmss"
+            let backupName = dest.deletingPathExtension().lastPathComponent + "-" + tag + "-" + stamp.string(from: Date()) + ".sav"
+            try fm.copyItem(at: dest, to: backups.appendingPathComponent(backupName))
+            pruneBackups(in: backups, keep: 50)
+        }
+        try data.write(to: dest, options: .atomic)
+        if wasOpen {
+            try open(rom: rom)
+            status += " (newest save loaded from the NAS)"
+        }
+    }
+
+    private func pruneBackups(in dir: URL, keep: Int) {
+        let fm = FileManager.default
+        let items = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "sav" }
+        guard items.count > keep else { return }
+        // Every name ends in a yyyyMMdd-HHmmss stamp; sort by that so the oldest go first.
+        let byStamp = items.sorted { $0.deletingPathExtension().lastPathComponent.suffix(15) < $1.deletingPathExtension().lastPathComponent.suffix(15) }
+        for old in byStamp.prefix(items.count - keep) { try? fm.removeItem(at: old) }
     }
 
     // MARK: - Core lifecycle
