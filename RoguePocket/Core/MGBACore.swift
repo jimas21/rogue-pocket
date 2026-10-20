@@ -68,6 +68,7 @@ final class MGBACore {
     func runFrame() { rp_run_frame(handle) }
     var frameCounter: UInt32 { rp_frame_counter(handle) }
     func setKeys(_ keys: GBAKeys) { rp_set_keys(handle, keys.rawValue) }
+    var keys: GBAKeys { GBAKeys(rawValue: rp_get_keys(handle)) }
 
     /// 240 * 160 pixels, 4 bytes each, memory order R,G,B,X. Valid while this object lives.
     var pixels: UnsafePointer<UInt32> { rp_pixels(handle) }

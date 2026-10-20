@@ -41,6 +41,9 @@ struct EmulatorScreen: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { fileMenu }
         }
+        // Touches near the screen edges go to the controls first, not to the Home/notification swipes.
+        .defersSystemGestures(on: .all)
+        .persistentSystemOverlays(.hidden)
         .onAppear { emu.screenDidAppear() }
         .onDisappear { emu.screenDidDisappear() }
         .sheet(item: $sheet) { item in
@@ -72,63 +75,31 @@ struct EmulatorScreen: View {
     // MARK: layouts
 
     private var portrait: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             GameScreen(emulator: emu)
                 .aspectRatio(240.0 / 160.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
             infoBlock
-            Spacer(minLength: 0)
-            VStack(spacing: 12) {
-                HStack {
-                    HoldButton(label: "L", keys: .l, emulator: emu, width: 96, height: 40, round: false)
-                    Spacer()
-                    HoldButton(label: "R", keys: .r, emulator: emu, width: 96, height: 40, round: false)
-                }
-                HStack(alignment: .center) {
-                    DPad(emulator: emu)
-                    Spacer(minLength: 8)
-                    VStack(spacing: 20) {
-                        HoldButton(label: "Select", keys: .select, emulator: emu, width: 78, height: 34)
-                        HoldButton(label: "Start", keys: .start, emulator: emu, width: 78, height: 34)
-                    }
-                    Spacer(minLength: 8)
-                    abCluster
-                }
-            }
+                .padding(.horizontal, 12)
+            ControllerPad(elements: PadLayout.portrait, layoutID: "portrait", emulator: emu)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
+        .padding(.bottom, 4)
     }
 
     private var landscape: some View {
-        HStack(spacing: 8) {
-            VStack(spacing: 14) {
-                HoldButton(label: "L", keys: .l, emulator: emu, width: 96, height: 40, round: false)
-                DPad(emulator: emu, side: 130)
-            }
-            VStack(spacing: 6) {
+        HStack(spacing: 0) {
+            ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu)
+                .frame(minWidth: 150, maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 4) {
                 GameScreen(emulator: emu)
                     .aspectRatio(240.0 / 160.0, contentMode: .fit)
                 infoBlock
-                HStack(spacing: 16) {
-                    HoldButton(label: "Select", keys: .select, emulator: emu, width: 78, height: 30)
-                    HoldButton(label: "Start", keys: .start, emulator: emu, width: 78, height: 30)
-                }
             }
-            VStack(spacing: 14) {
-                HoldButton(label: "R", keys: .r, emulator: emu, width: 96, height: 40, round: false)
-                abCluster
-            }
+            .layoutPriority(1)
+            ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu)
+                .frame(minWidth: 150, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(.horizontal, 8)
-    }
-
-    private var abCluster: some View {
-        ZStack {
-            HoldButton(label: "B", keys: .b, emulator: emu).offset(x: -34, y: 24)
-            HoldButton(label: "A", keys: .a, emulator: emu).offset(x: 34, y: -24)
-        }
-        .frame(width: 140, height: 130)
     }
 
     private var infoBlock: some View {
