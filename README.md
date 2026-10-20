@@ -1,6 +1,6 @@
 # Rogue Pocket
 
-A small iPhone app, built entirely in the cloud. There is no Mac in this project: GitHub Actions builds,
+A small iPhone and iPad app, built entirely in the cloud. There is no Mac in this project: GitHub Actions builds,
 signs and uploads each build to TestFlight.
 
 The home screen is still the pipeline check: it shows the version, the build number and "Pipeline OK".
