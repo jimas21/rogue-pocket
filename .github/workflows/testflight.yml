@@ -52,7 +52,7 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen || { brew update && brew install xcodegen; }
 
-      # Spike 002: the app links libmgba. Built here from a pinned commit (about 2 minutes), before archiving.
+      # The app links libmgba, built here from a pinned commit (about 2 minutes) before archiving.
       - name: Build libmgba for iOS
         run: bash ci/build_mgba.sh
 

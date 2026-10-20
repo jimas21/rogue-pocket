@@ -5,8 +5,8 @@ import UIKit
 
 /// Owns the running game: the core, the display-link clock, audio, input, the files, and the debug numbers.
 /// Everything here runs on the main thread: the display link fires there, UI callbacks are there, and so
-/// mGBA (which is not thread-safe) is only ever touched from one thread. Spike 002 measures whether that
-/// is fast enough (see the runFrame timings in the debug line); if it is not, the core moves to its own thread.
+/// mGBA (which is not thread-safe) is only ever touched from one thread. The runFrame timings in the debug
+/// line show whether that stays fast enough; if not, the core moves to its own thread.
 final class Emulator: ObservableObject {
     // UI state
     @Published private(set) var status = "No ROM loaded. Open the menu (top right) and choose Load ROM."
@@ -25,7 +25,7 @@ final class Emulator: ObservableObject {
     private static let frameDuration = 280_896.0 / 16_777_216.0
     private static let scratchFrames = 16_384
     private static let lastROMKey = "lastROM"
-    /// gPlayerPartyCount in the stock v2.2.1 map (spike 003's address); shown only as a live readMemory check.
+    /// gPlayerPartyCount in the stock v2.2.1 map; shown only as a live readMemory check.
     private static let partyCountAddress: UInt32 = 0x0203_6C79
 
     // Clock + stats
@@ -476,8 +476,8 @@ final class Emulator: ObservableObject {
     }
 
     /// Positional mapping: GBA A is the right-hand face button, B the bottom one (Xbox B and A respectively).
-    /// Whether Nintendo-layout pads report buttonA/buttonB by position or by label is UNVERIFIED; swap here if
-    /// a pad feels crossed.
+    /// Nintendo-layout pads may report buttonA/buttonB by label rather than position; swap here if a pad
+    /// feels crossed.
     private static func keys(from pad: GCExtendedGamepad) -> GBAKeys {
         var keys: GBAKeys = []
         if pad.buttonB.isPressed || pad.buttonY.isPressed { keys.insert(.a) }

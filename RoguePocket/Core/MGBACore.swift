@@ -26,11 +26,11 @@ enum CoreError: LocalizedError {
 
 /// Swift face of the C shim (rp_core.c): one instance per loaded ROM. Main thread only.
 ///
-/// Public surface the spikes build on:
+/// Public surface:
 ///   init(romURL:saveURL:)  load the ROM and attach the battery save (both before the first reset)
 ///   runFrame()             advance one frame (about 16.74 ms of GBA time)
 ///   pixels                 240x160 frame, bytes R,G,B,X
-///   readMemory(...)        copy bytes out of EWRAM / IWRAM (spike 003 decodes gPlayerParty from this)
+///   readMemory(...)        copy bytes out of EWRAM / IWRAM (the party and battle reads use this)
 ///   flushSave()            force the memory-mapped save to disk
 final class MGBACore {
     static let width = 240
@@ -85,7 +85,7 @@ final class MGBACore {
     var saveTypeName: String { String(cString: rp_save_type_name(handle)) }
     var saveSize: Int { Int(rp_save_size(handle)) }
 
-    // MARK: memory (spike 003 uses these)
+    // MARK: memory
 
     /// Host address of EWRAM, as a number, to check that the pointer does not move across reset().
     var ewramAddress: UInt { UInt(bitPattern: rp_memory_ptr(handle, 0, nil)) }
