@@ -41,10 +41,13 @@ final class Emulator: ObservableObject {
     private var winFrames = 0
     private var winRunSum = 0.0
     private var winRunMax = 0.0
+    private var winKeysSent: GBAKeys = []
+    private var winKeysCore: GBAKeys = []
     private var ewramAddressAtOpen: UInt = 0
 
     // Input
     private var touchKeys: GBAKeys = []
+    private var touchSources: [String: GBAKeys] = [:]
     private var padKeys: GBAKeys = []
 
     private(set) var romURL: URL?
@@ -353,7 +356,10 @@ final class Emulator: ObservableObject {
         accumulator += dt
         winTicks += 1
 
-        core.setKeys(touchKeys.union(padKeys))
+        let keys = touchKeys.union(padKeys)
+        core.setKeys(keys)
+        winKeysSent.formUnion(keys)
+        winKeysCore.formUnion(core.keys)
         var ran = 0
         while accumulator >= Emulator.frameDuration && ran < 4 {
             let start = CACurrentMediaTime()
@@ -396,12 +402,23 @@ final class Emulator: ObservableObject {
         let line1 = "emu \(fmt(emuFps, 1)) fps | display \(fmt(displayHz, 0)) Hz | run \(fmt(avg, 2))/\(fmt(winRunMax, 2)) ms"
         let line2 = "audio \(core.audioRate)>\(fmt(audioStatus.hardwareRate, 0)) Hz | \(fmt(audioStatus.bufferedMs, 0)) ms | \(audioStatus.underruns) underruns"
         let line3 = "save \(core.saveTypeName) \(core.saveSize) B | RAM[0x02036C79]=\(countText) | ptr \(pointerState) | pads \(pads)"
-        debugText = [line1, line2, line3].joined(separator: "\n")
+        // Everything pressed during the last half second, so a quick tap still shows up.
+        let line4 = "keys sent \(Emulator.keyNames(winKeysSent)) | core got \(Emulator.keyNames(winKeysCore))"
+        debugText = [line1, line2, line3, line4].joined(separator: "\n")
         winStart = now
         winTicks = 0
         winFrames = 0
         winRunSum = 0
         winRunMax = 0
+        winKeysSent = []
+        winKeysCore = []
+    }
+
+    static func keyNames(_ keys: GBAKeys) -> String {
+        let names: [(GBAKeys, String)] = [(.a, "A"), (.b, "B"), (.select, "Sel"), (.start, "Start"), (.right, "Right"),
+                                          (.left, "Left"), (.up, "Up"), (.down, "Down"), (.r, "R"), (.l, "L")]
+        let held = names.filter { keys.contains($0.0) }.map(\.1)
+        return held.isEmpty ? "-" : held.joined(separator: "+")
     }
 
     private func fmt(_ value: Double, _ digits: Int) -> String {
@@ -434,12 +451,10 @@ final class Emulator: ObservableObject {
 
     // MARK: - Input
 
-    func setTouch(_ keys: GBAKeys, down: Bool) {
-        if down {
-            touchKeys.formUnion(keys)
-        } else {
-            touchKeys.subtract(keys)
-        }
+    /// Each on-screen pad reports everything it holds; the game gets the union of all pads.
+    func setTouchKeys(_ keys: GBAKeys, from source: String) {
+        touchSources[source] = keys
+        touchKeys = touchSources.values.reduce(into: GBAKeys()) { $0.formUnion($1) }
     }
 
     private func observeControllers() {

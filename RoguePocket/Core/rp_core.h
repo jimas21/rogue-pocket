@@ -56,6 +56,8 @@ void rp_reset(RPCore* rp);
 void rp_run_frame(RPCore* rp);
 uint32_t rp_frame_counter(const RPCore* rp);
 void rp_set_keys(RPCore* rp, uint32_t keys);
+/* What the core currently holds as pressed (debug: proves rp_set_keys arrived). */
+uint32_t rp_get_keys(RPCore* rp);
 
 /* RP_VIDEO_WIDTH x RP_VIDEO_HEIGHT pixels, 4 bytes each, memory order R,G,B,X. Valid until rp_close. */
 const uint32_t* rp_pixels(const RPCore* rp);

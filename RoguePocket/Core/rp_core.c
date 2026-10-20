@@ -203,6 +203,10 @@ void rp_set_keys(RPCore* rp, uint32_t keys) {
 	rp->core->setKeys(rp->core, keys);
 }
 
+uint32_t rp_get_keys(RPCore* rp) {
+	return rp->core->getKeys(rp->core);
+}
+
 const uint32_t* rp_pixels(const RPCore* rp) {
 	return (const uint32_t*) rp->video;
 }
