@@ -13,6 +13,9 @@ struct EmulatorScreen: View {
     @AppStorage("ffSpeed") private var ffSpeed = 3
     @State private var sheet: Sheet?
     @State private var showDex = false
+    /// What the foe has shown this battle: the strip in portrait, a panel on request in landscape.
+    @StateObject private var memory = BattleMemory()
+    @State private var showMemory = false
 
     /// Width of each control column in landscape.
     private static let sideColumn: CGFloat = 128
@@ -55,6 +58,15 @@ struct EmulatorScreen: View {
         .defersSystemGestures(on: .all)
         .persistentSystemOverlays(.hidden)
         .statusBarHidden()
+        .task {
+            while !Task.isCancelled {
+                await MainActor.run {
+                    memory.refresh(from: dex.battleSnapshot(), data: emu.overlay.data)
+                    if memory.facts == nil { showMemory = false }
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
         .onAppear { emu.screenDidAppear() }
         .onDisappear { emu.screenDidDisappear() }
     }
@@ -67,7 +79,7 @@ struct EmulatorScreen: View {
             Button {
                 showDex = true
             } label: {
-                DexStrip(dex: dex, overlay: emu.overlay)
+                DexStrip(memory: memory, overlay: emu.overlay)
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 10)
@@ -83,8 +95,34 @@ struct EmulatorScreen: View {
         return HStack(spacing: 0) {
             ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu)
                 .frame(width: side)
+                .overlay(alignment: .top) {
+                    // In the gap between L and the D-pad (see PadLayout.landscapeLeft).
+                    if memory.facts != nil {
+                        Button {
+                            showMemory.toggle()
+                        } label: {
+                            Image(systemName: showMemory ? "list.bullet.circle.fill" : "list.bullet.circle")
+                                .font(.system(size: 26))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .frame(width: 44, height: 44)
+                        }
+                        .padding(.top, size.height * 0.12 + 24)
+                    }
+                }
             picture
                 .frame(width: pictureWidth)
+                .overlay(alignment: .bottom) {
+                    if showMemory, let facts = memory.facts {
+                        BattleMemoryView(facts: facts, overlay: emu.overlay)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(red: 0.12, green: 0.15, blue: 0.2).opacity(0.94),
+                                        in: RoundedRectangle(cornerRadius: 12))
+                            .padding(8)
+                            .onTapGesture { showMemory = false }
+                    }
+                }
             ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu)
                 .frame(width: side)
         }
@@ -219,9 +257,8 @@ struct EmulatorScreen: View {
 /// The strip between the picture and the controls in portrait. In a battle it remembers what the foe has shown
 /// (BattleMemoryView); otherwise it is the Dex button. Its height never changes, so the controls never move.
 private struct DexStrip: View {
-    let dex: DexHost
+    @ObservedObject var memory: BattleMemory
     @ObservedObject var overlay: BattleOverlay
-    @StateObject private var memory = BattleMemory()
 
     var body: some View {
         Group {
@@ -239,12 +276,6 @@ private struct DexStrip: View {
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, minHeight: 64, maxHeight: 64, alignment: .leading)
         .background(Color(red: 0.12, green: 0.15, blue: 0.2), in: RoundedRectangle(cornerRadius: 12))
-        .task {
-            while !Task.isCancelled {
-                await MainActor.run { memory.refresh(from: dex.battleSnapshot(), data: overlay.data) }
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
-        }
     }
 }
 
