@@ -35,7 +35,7 @@ struct ContentView: View {
             }
         }
         .fullScreenCover(isPresented: $playing) {
-            EmulatorScreen(emu: emulator, sync: sync, dex: dex)
+            EmulatorScreen(emu: emulator, sync: sync)
         }
         // While the game is up, EmulatorScreen shows the save prompt itself (a cover hides sheets from below).
         .sheet(item: playing ? .constant(nil) : $sync.choice) { choice in
