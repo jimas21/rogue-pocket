@@ -27,6 +27,8 @@ final class Emulator: ObservableObject {
     private var settingAutoMute = false
 
     weak var screen: GameScreenView?
+    /// What the battle overlay draws over the picture; read from memory after each batch of frames.
+    let overlay = BattleOverlay()
     private(set) var core: MGBACore?
 
     // Constants
@@ -407,7 +409,10 @@ final class Emulator: ObservableObject {
             ran += 1
         }
         if ran == maxFrames { accumulator = 0 }
-        if ran > 0 { screen?.present(pixels: core.pixels) }
+        if ran > 0 {
+            screen?.present(pixels: core.pixels)
+            overlay.framesDidRun(core)
+        }
         updateStats(core, now: now)
     }
 

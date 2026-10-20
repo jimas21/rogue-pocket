@@ -92,6 +92,7 @@ struct EmulatorScreen: View {
     private var picture: some View {
         GameScreen(emulator: emu)
             .aspectRatio(240.0 / 160.0, contentMode: .fit)
+            .overlay { BattleOverlayView(overlay: emu.overlay) }
             .frame(maxWidth: .infinity)
             .overlay(alignment: .bottomLeading) {
                 if showDebug {
