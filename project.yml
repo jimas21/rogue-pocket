@@ -1,5 +1,4 @@
 # XcodeGen project definition. CI runs `xcodegen generate`; the .xcodeproj is never committed.
-# Spike 002 added: the libmgba search paths, -lmgba, and the bridging header for the C shim (RoguePocket/Core).
 # DEVELOPMENT_TEAM and PRODUCT_BUNDLE_IDENTIFIER are injected on the xcodebuild command line
 # from the repo variables TEAM_ID and BUNDLE_ID (ci/archive.sh), so nothing personal lives here.
 name: RoguePocket
@@ -22,7 +21,7 @@ targets:
         INFOPLIST_FILE: Config/Info.plist
         GENERATE_INFOPLIST_FILE: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        TARGETED_DEVICE_FAMILY: "1,2"                         # iPhone and iPad (Jim, 2026-10-19)
+        TARGETED_DEVICE_FAMILY: "1,2"                         # iPhone and iPad
         SWIFT_VERSION: "5.0"
         # libmgba (static, arm64) and its headers come from ci/build_mgba.sh, which fills Vendor/mgba-dist.
         # rp_core.c includes <mgba/flags.h> first; that header carries the compile definitions libmgba was built with.

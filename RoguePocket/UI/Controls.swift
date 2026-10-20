@@ -3,8 +3,8 @@ import UIKit
 
 // On-screen controls. One UIKit view per pad tracks every finger itself (touchesBegan/Moved/Ended), the way
 // emulator front ends do it: true multi-touch, a thumb can slide across the D-pad or from B onto A, and nothing
-// depends on SwiftUI gesture arbitration between sibling views. (Build 6 used one SwiftUI gesture per button in an
-// HStack 408 pt wide on a 393 pt phone: the buttons overlapped and most presses never reached the game.)
+// depends on SwiftUI gesture arbitration between sibling views. Controls are placed by fraction of the pad's
+// size, so the layout fits any screen width.
 
 /// One control, placed in its pad: `center` is a fraction of the pad's size, `size` is in points.
 struct PadElement {

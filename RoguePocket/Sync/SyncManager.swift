@@ -56,7 +56,7 @@ private struct SyncState: Codable {
     var lastSync: Date?
 }
 
-/// A decision only Jim can make. Shown as a sheet from anywhere in the app.
+/// A decision for the player. Shown as a sheet from anywhere in the app.
 struct SaveChoice: Identifiable {
     enum Kind {
         case bothChanged      // phone and another device both saved since the last sync

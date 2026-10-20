@@ -43,7 +43,7 @@ hints() {
 Likely causes, in order:
   1. "Cloud signing permission error": the API key is not Admin. Create a new Team Key with Admin access.
   2. "No profile for ... found" even with the key flags: a known, unresolved Apple forum report. Fallback is a
-     manually created distribution certificate, or fastlane match with the API key (see the spike README).
+     manually created distribution certificate, or fastlane match with the API key.
   3. No App Store Connect app record for this bundle ID (App Store Connect > Apps > + > New App).
   4. The build number was already uploaded (re-running a job reuses the run number; push a new commit instead),
      or the version is below one already approved ("closed train", codes 90062/90186/90478).
