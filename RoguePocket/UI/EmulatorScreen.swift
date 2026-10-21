@@ -120,6 +120,7 @@ struct EmulatorScreen: View {
                     gameMenu.padding(.top, size.height * 0.76 - 22)
                 }
                 .padding(.leading, margin)
+                .zIndex(1) // a floating D-pad that slides past the column's edge draws over the picture
             picture
                 .frame(width: pictureWidth)
             ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu, avoid: rightAvoid)
