@@ -39,8 +39,9 @@ enum PadLayout {
         .button(.r, "R", x: 0.86, y: 0.22, w: 92, h: 38, round: false),
         .fastForward(x: 0.5, y: 0.22),
         .dpad(x: 0.25, y: 0.48),
-        .button(.a, "A", x: 0.86, y: 0.41),
-        .button(.b, "B", x: 0.66, y: 0.53),
+        // Same as landscape: side by side, ~25 degrees (the pad is ~445 pt tall on a phone).
+        .button(.a, "A", x: 0.86, y: 0.42),
+        .button(.b, "B", x: 0.68, y: 0.50),
         .button(.select, "Select", x: 0.40, y: 0.87, w: 74, h: 30),
         .button(.start, "Start", x: 0.60, y: 0.87, w: 74, h: 30),
     ]
