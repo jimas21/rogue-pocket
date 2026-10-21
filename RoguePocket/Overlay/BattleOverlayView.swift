@@ -24,10 +24,10 @@ struct BattleOverlayView: View {
             if state.doubles {
                 drawDoublesWeaknesses(state.foes, ctx: ctx, s: s)
             } else if let foe = state.foes.first, let box = foe.box {
-                // Singles: its own types small, inside its HP box in the dark band between the Poke Ball mark and
-                // "HP"; what it is weak to on the empty background above the box, ending before its sprite (x 144).
-                drawTypes(foe.types, x: box.x + 15, y: box.y + 17, icon: 6, gap: 0, divider: false, ctx: ctx, s: s)
-                drawRow(foe.weaknesses, x: box.x + 2, y: box.y - 12, icon: 10, end: 143, ctx: ctx, s: s)
+                // Singles: its own types inside its HP box, left of "HP" (mirroring your box); what it is weak to on
+                // the empty background above the box, ending before its sprite (x 144). One icon size everywhere: 8.
+                drawTypes(foe.types, x: box.x + 8, y: box.y + 15, icon: 8, divider: false, ctx: ctx, s: s)
+                drawRow(foe.weaknesses, x: box.x + 2, y: box.y - 11, icon: 8, end: 143, ctx: ctx, s: s)
             }
             if let box = state.playerBox, !state.playerTypes.isEmpty {
                 // Your types in your HP box's empty corner, right of where a status (PSN, BRN...) appears.
@@ -107,7 +107,7 @@ struct BattleOverlayView: View {
     /// A row of weaknesses: each type's icon, then its multiplier. Tightens when there are many.
     private func drawRow(_ list: [BattleOverlayState.Weakness], x start: CGFloat, y top: CGFloat, icon size: CGFloat,
                          end: CGFloat, ctx: GraphicsContext, s: CGFloat) {
-        let layouts: [(icon: CGFloat, gap: CGFloat)] = [(size, 2), (size, 1), (8, 1), (8, 0)]   // close together
+        let layouts: [(icon: CGFloat, gap: CGFloat)] = [(size, 3), (size, 2), (size, 1), (size, 0)]   // close together
         let layout = layouts.first { l in
             start + list.reduce(CGFloat(0)) { $0 + l.icon + 1 + MicroFont.width(label($1.multiplier)) + l.gap } <= end
         } ?? layouts[layouts.count - 1]
