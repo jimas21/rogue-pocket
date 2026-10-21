@@ -1,0 +1,21 @@
+# Keeps a "Release x.y.z" pull request up to date from the conventional commits on main
+# (feat: minor, fix: patch while below 1.0). Merging it bumps MARKETING_VERSION, updates
+# CHANGELOG.md, and creates the vX.Y.Z tag and GitHub release.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
