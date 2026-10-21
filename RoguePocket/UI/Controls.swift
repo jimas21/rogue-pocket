@@ -35,9 +35,9 @@ struct PadElement {
 enum PadLayout {
     /// Portrait: one pad under the game picture.
     static let portrait: [PadElement] = [
-        .button(.l, "L", x: 0.14, y: 0.09, w: 92, h: 38, round: false),
-        .button(.r, "R", x: 0.86, y: 0.09, w: 92, h: 38, round: false),
-        .fastForward(x: 0.5, y: 0.09),
+        .button(.l, "L", x: 0.14, y: 0.22, w: 92, h: 38, round: false),
+        .button(.r, "R", x: 0.86, y: 0.22, w: 92, h: 38, round: false),
+        .fastForward(x: 0.5, y: 0.22),
         .dpad(x: 0.25, y: 0.48),
         .button(.a, "A", x: 0.86, y: 0.40),
         .button(.b, "B", x: 0.68, y: 0.56),

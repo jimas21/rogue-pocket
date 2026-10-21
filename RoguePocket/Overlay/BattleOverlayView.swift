@@ -24,8 +24,14 @@ struct BattleOverlayView: View {
             if state.doubles {
                 drawDoublesWeaknesses(state.foes, ctx: ctx, s: s)
             } else if let foe = state.foes.first, let box = foe.box {
-                // Singles: a row on the empty background above its HP box, ending before its sprite (x 144).
-                drawRow(foe.weaknesses, x: box.x + 2, y: box.y - 12, icon: 10, end: 143, ctx: ctx, s: s)
+                // Singles: a row on the empty background above its HP box, ending before its sprite (x 144): its own
+                // types, a thin divider, then what it is weak to.
+                let x = drawTypes(foe.types, x: box.x + 2, y: box.y - 12, icon: 10, ctx: ctx, s: s)
+                drawRow(foe.weaknesses, x: x, y: box.y - 12, icon: 10, end: 143, ctx: ctx, s: s)
+            }
+            if let box = state.playerBox, !state.playerTypes.isEmpty {
+                // Your types in your HP box's empty corner, right of where a status (PSN, BRN...) appears.
+                drawTypes(state.playerTypes, x: box.x + 42, y: box.y + 24, icon: 8, divider: false, ctx: ctx, s: s)
             }
             for tag in state.moveTags where tag.slot < Self.moveSlots.count {
                 drawTag(tag.multipliers, at: Self.moveSlots[tag.slot], ctx: ctx, s: s)
@@ -44,7 +50,7 @@ struct BattleOverlayView: View {
         for (i, p) in placed.enumerated() {
             let y0 = max(p.box.y + 1, top)
             let yEnd = i + 1 < placed.count ? p.box.y + 32 : 56   // the lower box's rows stop above your Pokemon
-            var x = x0, y = y0
+            var x = drawTypes(p.foe.types, x: x0, y: y0, icon: 8, ctx: ctx, s: s), y = y0
             for w in p.foe.weaknesses {
                 let width = 8 + 1 + MicroFont.width(label(w.multiplier))
                 if x + width > 119 { x = x0; y += 9 }
@@ -68,6 +74,7 @@ struct BattleOverlayView: View {
                 }
                 x += 12
             }
+            x = drawTypes(foe.types, x: x, y: y + 1, icon: 8, ctx: ctx, s: s)
             drawRow(foe.weaknesses, x: x, y: y, icon: 8, end: 94, ctx: ctx, s: s)
         }
         for hint in state.partyHints where hint.slot < Self.partySlots.count {
@@ -76,6 +83,26 @@ struct BattleOverlayView: View {
     }
 
     private func label(_ m: Double) -> String { "x" + MicroFont.number(m) }
+
+    /// A Pokemon's own types (a repeated type and the empty third type drawn once / not at all), then optionally a thin
+    /// divider before what follows. Returns where the next thing starts.
+    @discardableResult
+    private func drawTypes(_ types: [Int], x start: CGFloat, y: CGFloat, icon size: CGFloat, divider: Bool = true,
+                           ctx: GraphicsContext, s: CGFloat) -> CGFloat {
+        var shown: [Int] = []
+        for t in types where t != 9 && !shown.contains(t) { shown.append(t) }
+        var x = start
+        for t in shown {
+            if let icon = overlay.typeIcons[t] {
+                ctx.draw(Image(uiImage: icon).interpolation(.none), in: CGRect(x: x * s, y: y * s, width: size * s, height: size * s))
+            }
+            x += size + 1
+        }
+        guard divider, !shown.isEmpty else { return x }
+        ctx.fill(Path(CGRect(x: (x + 1) * s, y: (y + 1) * s, width: s, height: (size - 2) * s)),
+                 with: .color(Color(white: 0.97).opacity(0.7)))
+        return x + 4
+    }
 
     /// A row of weaknesses: each type's icon, then its multiplier. Tightens when there are many.
     private func drawRow(_ list: [BattleOverlayState.Weakness], x start: CGFloat, y top: CGFloat, icon size: CGFloat,

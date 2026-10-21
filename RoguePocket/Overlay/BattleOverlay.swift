@@ -34,6 +34,9 @@ struct BattleOverlayState: Equatable {
 
     var doubles = false
     var foes: [Foe] = []
+    /// Your Pokemon's types and the top-left of its HP box (singles; drawn in the box's empty corner).
+    var playerTypes: [Int] = []
+    var playerBox: CGPoint?
     /// Only while the move menu is open.
     var moveTags: [MoveTag] = []
     /// The switch screen is up: the weaknesses go top left, and members get a hint when that hit is not neutral.
@@ -218,6 +221,19 @@ enum BattleReader {
         }
         guard !state.foes.isEmpty else { return nil }
 
+        if !state.doubles, !state.partyMenu, u16(Array(mons[0..<96]), 0) > 0 {
+            state.playerTypes = [Int(mons[34]), Int(mons[35]), Int(mons[36])]
+            if let ids = boxIds, ids[0] < 64,
+               let sprite = core.readMemory(address: sprites + UInt32(ids[0]) * 68, length: 68) {
+                let flags = u16(sprite, 62)
+                if flags & 1 != 0, flags & 4 == 0, s16(sprite, 58) == 0 {
+                    let x = Int(s16(sprite, 0x20)) + Int(s16(sprite, 0x24)) + Int(Int8(bitPattern: sprite[0x28]))
+                    let y = Int(s16(sprite, 0x22)) + Int(s16(sprite, 0x26)) + Int(Int8(bitPattern: sprite[0x29]))
+                    state.playerBox = CGPoint(x: x, y: y)
+                }
+            }
+        }
+
         // The switch screen lists gPlayerParty in its stored order (the game reorders the party for the menu).
         if state.partyMenu {
             let party = min(Int(core.readMemory(address: playerParty - 3, length: 1)?.first ?? 0), 6)
@@ -248,6 +264,26 @@ enum BattleReader {
             }
         }
         return state
+    }
+
+    /// One line for the debug readout: each check the reader makes, with what it found.
+    static func probe(_ core: MGBACore) -> String {
+        guard let main = core.readMemory(address: gMain, length: 0x43A) else { return "gMain unreadable" }
+        let cb2 = u32(main, 4)
+        let screen = cb2 == battleMainCB2 ? "battle" : cb2 == partyMenuCB2 ? "switch" : String(cb2, radix: 16)
+        var out = "cb2 \(screen) inBattle \(main[0x439] & 2 != 0)"
+        guard let count = core.readMemory(address: battlersCount, length: 1)?.first else { return out }
+        out += " battlers \(count)"
+        guard let mon = core.readMemory(address: battleMons + 96, length: 96),
+              let indexes = core.readMemory(address: battlerPartyIndexes, length: 4) else { return out }
+        let idx = Int(u16(indexes, 2))
+        let match = idx < 6 ? core.readMemory(address: enemyParty + UInt32(idx * 104), length: 4).map { u32($0, 0) == u32(mon, 76) } : nil
+        out += " foe \(u16(mon, 0)) hp \(u16(mon, 42)) slot \(idx) same \(match.map { String($0) } ?? "?")"
+        if let ids = core.readMemory(address: healthboxSpriteIds, length: 4), ids[1] < 64,
+           let sprite = core.readMemory(address: sprites + UInt32(ids[1]) * 68, length: 68) {
+            out += " box id \(ids[1]) flags \(String(u16(sprite, 62), radix: 16)) owner \(s16(sprite, 58))"
+        }
+        return out
     }
 
     /// Substruct order (growth, attacks, EVs, misc) by personality % 24.
@@ -302,8 +338,21 @@ final class BattleOverlay: ObservableObject {
         return image
     }
 
+    /// What the reader sees, for Debug > Show debug info (refreshed about three times a second).
+    @Published private(set) var debugLine = ""
+
     func framesDidRun(_ core: MGBACore) {
         tick += 1
+        if tick % 30 == 0 {
+            var line = "overlay: data \(data != nil) icons \(typeIcons.count) | " + BattleReader.probe(core)
+            if let s = state {
+                let box = s.foes.first?.box.map { "\(Int($0.x)),\(Int($0.y))" } ?? "none"
+                line += " | foes \(s.foes.count) box \(box) weak \(s.foes.first?.weaknesses.count ?? 0) tags \(s.moveTags.count)"
+            } else {
+                line += " | no state"
+            }
+            if line != debugLine { debugLine = line }
+        }
         guard tick % 3 == 0 else { return }   // ~20 reads a second is plenty
         guard let data else { return loadIfNeeded() }
         let next = BattleReader.read(core, data: data, previous: state)

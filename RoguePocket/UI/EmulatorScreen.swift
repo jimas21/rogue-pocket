@@ -171,6 +171,7 @@ struct EmulatorScreen: View {
             Text(emu.status)
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.75))
+            OverlayDebugLine(overlay: emu.overlay)
         }
     }
 
@@ -316,5 +317,17 @@ private struct LogView: View {
         lives in Saves/<rom name>.sav; a .sav next to the ROM seeds it the first time. The menu entry Export save writes a
         copy out. Importing a save keeps the old one in Saves/Backups.
         """
+    }
+}
+
+/// The battle overlay's own readout in the debug block: what it sees at each step.
+private struct OverlayDebugLine: View {
+    @ObservedObject var overlay: BattleOverlay
+
+    var body: some View {
+        Text(overlay.debugLine)
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(.green.opacity(0.9))
+            .textSelection(.enabled)
     }
 }
