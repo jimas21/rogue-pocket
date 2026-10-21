@@ -41,3 +41,6 @@ xcuserdata/
 
 # libmgba source checkout and build output (ci/build_mgba.sh recreates them)
 Vendor/
+
+# Local planning notes (kept off GitHub)
+.planning/
