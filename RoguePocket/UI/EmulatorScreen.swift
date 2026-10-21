@@ -19,8 +19,8 @@ struct EmulatorScreen: View {
     /// Bumped when the phone turns, so the island side is read again (a half turn keeps the same size).
     @State private var orientationTick = 0
 
-    /// Narrowest control column in landscape (wide screens, iPad).
-    private static let sideColumn: CGFloat = 128
+    /// Control column width in landscape: room for the full-size D-pad (140 pt).
+    private static let sideColumn: CGFloat = 140
 
     enum Sheet: Identifiable {
         case rom

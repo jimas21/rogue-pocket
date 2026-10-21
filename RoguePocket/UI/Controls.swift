@@ -196,7 +196,7 @@ final class ControllerView: UIView {
         var size = element.size
         if case .dpad = element.kind {
             // Shrink the D-pad on short pads (small phones, landscape) so it never runs into L/R or Select/Start.
-            let side = max(90, min(size.width, bounds.height * 0.62, bounds.width * 0.9))
+            let side = max(90, min(size.width, bounds.height * 0.62, bounds.width))
             size = CGSize(width: side, height: side)
         }
         let c = CGPoint(x: element.center.x * bounds.width, y: element.center.y * bounds.height)
