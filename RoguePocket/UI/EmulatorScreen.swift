@@ -11,6 +11,7 @@ struct EmulatorScreen: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("showDebug") private var showDebug = false
     @AppStorage("ffSpeed") private var ffSpeed = 3
+    @AppStorage("colorCorrection") private var colorCorrection = true
     @State private var sheet: Sheet?
     @State private var showDex = false
     /// What the foe has shown this battle: the strip in portrait, a panel on request in landscape.
@@ -129,7 +130,7 @@ struct EmulatorScreen: View {
     }
 
     private var picture: some View {
-        GameScreen(emulator: emu)
+        GameScreen(emulator: emu, colorCorrection: colorCorrection)
             .aspectRatio(240.0 / 160.0, contentMode: .fit)
             .overlay { BattleOverlayView(overlay: emu.overlay) }
             .frame(maxWidth: .infinity)
@@ -191,6 +192,7 @@ struct EmulatorScreen: View {
                 Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
             }
             Toggle(isOn: $emu.muted) { Label("Mute", systemImage: "speaker.slash") }
+            Toggle(isOn: $colorCorrection) { Label("GBA screen colours", systemImage: "paintpalette") }
             Picker(selection: $ffSpeed) {
                 Text("2x").tag(2)
                 Text("3x").tag(3)
