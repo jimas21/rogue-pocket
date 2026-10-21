@@ -8,75 +8,125 @@ struct BattleOverlayView: View {
     /// Where each move's name starts in the move menu, and the free row under it.
     private static let moveSlots = [CGPoint(x: 16, y: 134), CGPoint(x: 88, y: 134),
                                     CGPoint(x: 16, y: 151), CGPoint(x: 88, y: 151)]
-    /// The weakness row must end before the enemy's sprite (which starts at x 144).
-    private static let weaknessRowEnd: CGFloat = 143
     /// The switch screen: the first member's big card (its free spot is just above the card), then the free gap in
     /// the second row of each of the five slots on the right.
     private static let partySlots = [CGPoint(x: 60, y: 17)] + (0..<5).map { CGPoint(x: 165, y: 26 + 24 * CGFloat($0)) }
+    private static let shadow = Color(red: 16 / 255, green: 16 / 255, blue: 32 / 255)
 
     var body: some View {
         Canvas { ctx, size in
             guard let state = overlay.state else { return }
             let s = size.width / 240
             if state.partyMenu {
-                // The switch screen: its top left is empty background.
-                drawWeaknesses(state.weaknesses, at: CGPoint(x: 4, y: 3), icon: 8, ctx: ctx, s: s)
-                for hint in state.partyHints where hint.slot < Self.partySlots.count {
-                    drawHint(hint, at: Self.partySlots[hint.slot], ctx: ctx, s: s)
-                }
+                drawSwitchScreen(state, ctx: ctx, s: s)
                 return
             }
-            if let box = state.enemyBox, !state.weaknesses.isEmpty {
-                drawWeaknesses(state.weaknesses, at: CGPoint(x: box.x + 2, y: box.y - 12), icon: 10, ctx: ctx, s: s)
+            if state.doubles {
+                drawDoublesWeaknesses(state.foes, ctx: ctx, s: s)
+            } else if let foe = state.foes.first, let box = foe.box {
+                // Singles: a row on the empty background above its HP box, ending before its sprite (x 144).
+                drawRow(foe.weaknesses, x: box.x + 2, y: box.y - 12, icon: 10, end: 143, ctx: ctx, s: s)
             }
             for tag in state.moveTags where tag.slot < Self.moveSlots.count {
-                drawTag(tag.multiplier, at: Self.moveSlots[tag.slot], ctx: ctx, s: s)
+                drawTag(tag.multipliers, at: Self.moveSlots[tag.slot], ctx: ctx, s: s)
             }
         }
         .allowsHitTesting(false)
     }
 
-    /// Each type it is weak to: the type's icon, then its multiplier. Tightens when there are many.
-    private func drawWeaknesses(_ list: [BattleOverlayState.Weakness], at origin: CGPoint, icon size: CGFloat,
-                                ctx: GraphicsContext, s: CGFloat) {
-        let labels = list.map { "x" + MicroFont.number($0.multiplier) }
-        let layouts: [(icon: CGFloat, gap: CGFloat)] = [(size, 4), (size, 2), (8, 2), (8, 1)]
-        let start = origin.x
-        let layout = layouts.first { l in
-            start + zip(list, labels).reduce(CGFloat(0)) { $0 + l.icon + 1 + MicroFont.width($1.1) + l.gap } <= Self.weaknessRowEnd
-        } ?? layouts[layouts.count - 1]
-        var x = start
-        let top = origin.y
-        for (w, label) in zip(list, labels) {
-            if let icon = overlay.typeIcons[w.type] {
-                let inset = (10 - layout.icon) / 2
-                ctx.draw(Image(uiImage: icon).interpolation(.none),
-                         in: CGRect(x: x * s, y: (top + inset) * s, width: layout.icon * s, height: layout.icon * s))
+    /// Doubles: the two HP boxes stack at the top left and the foes stand to the right (the nearer one's sprite
+    /// starts at x 120). Each foe's weaknesses fill the background between, beside its own box, two to a row.
+    private func drawDoublesWeaknesses(_ foes: [BattleOverlayState.Foe], ctx: GraphicsContext, s: CGFloat) {
+        let placed = foes.compactMap { f in f.box.map { (foe: f, box: $0) } }.sorted { $0.box.y < $1.box.y }
+        guard let right = placed.map({ $0.box.x + 64 }).max() else { return }
+        let x0 = right + 2
+        var top: CGFloat = 0
+        for (i, p) in placed.enumerated() {
+            let y0 = max(p.box.y + 1, top)
+            let yEnd = i + 1 < placed.count ? p.box.y + 32 : 56   // the lower box's rows stop above your Pokemon
+            var x = x0, y = y0
+            for w in p.foe.weaknesses {
+                let width = 8 + 1 + MicroFont.width(label(w.multiplier))
+                if x + width > 119 { x = x0; y += 9 }
+                if y + 8 > yEnd { break }
+                drawWeakness(w, x: x, y: y, icon: 8, ctx: ctx, s: s)
+                x += width + 2
             }
-            x += layout.icon + 1
-            MicroFont.draw(label, x: x + 1, y: top + 4, color: Color(red: 16 / 255, green: 16 / 255, blue: 32 / 255), ctx: ctx, s: s)
-            MicroFont.draw(label, x: x, y: top + 3, color: Color(white: 0.97), ctx: ctx, s: s)
-            x += MicroFont.width(label) + layout.gap
+            top = p.box.y + 33
         }
     }
 
-    /// A switch-screen slot: the enemy's type that hits this member hardest, and how hard (red worse, green better).
+    /// The switch screen: the foes' weaknesses on the empty background top left (in doubles a small picture says
+    /// whose row it is), and each member's hint in its slot.
+    private func drawSwitchScreen(_ state: BattleOverlayState, ctx: GraphicsContext, s: CGFloat) {
+        for (i, foe) in state.foes.enumerated() {
+            let y = 3 + 10 * CGFloat(i)
+            var x: CGFloat = 4
+            if state.doubles {
+                if let sprite = overlay.foeSprite(foe.species) {
+                    ctx.draw(Image(uiImage: sprite).interpolation(.none), in: CGRect(x: x * s, y: (y - 1) * s, width: 10 * s, height: 10 * s))
+                }
+                x += 12
+            }
+            drawRow(foe.weaknesses, x: x, y: y, icon: 8, end: 94, ctx: ctx, s: s)
+        }
+        for hint in state.partyHints where hint.slot < Self.partySlots.count {
+            drawHint(hint, at: Self.partySlots[hint.slot], ctx: ctx, s: s)
+        }
+    }
+
+    private func label(_ m: Double) -> String { "x" + MicroFont.number(m) }
+
+    /// A row of weaknesses: each type's icon, then its multiplier. Tightens when there are many.
+    private func drawRow(_ list: [BattleOverlayState.Weakness], x start: CGFloat, y top: CGFloat, icon size: CGFloat,
+                         end: CGFloat, ctx: GraphicsContext, s: CGFloat) {
+        let layouts: [(icon: CGFloat, gap: CGFloat)] = [(size, 4), (size, 2), (8, 2), (8, 1)]
+        let layout = layouts.first { l in
+            start + list.reduce(CGFloat(0)) { $0 + l.icon + 1 + MicroFont.width(label($1.multiplier)) + l.gap } <= end
+        } ?? layouts[layouts.count - 1]
+        var x = start
+        for w in list {
+            drawWeakness(w, x: x, y: top + (10 - layout.icon) / 2, icon: layout.icon, ctx: ctx, s: s)
+            x += layout.icon + 1 + MicroFont.width(label(w.multiplier)) + layout.gap
+        }
+    }
+
+    /// One weakness: the type's icon, then its multiplier beside it (vertically centred on the icon).
+    private func drawWeakness(_ w: BattleOverlayState.Weakness, x: CGFloat, y: CGFloat, icon size: CGFloat,
+                              ctx: GraphicsContext, s: CGFloat) {
+        if let icon = overlay.typeIcons[w.type] {
+            ctx.draw(Image(uiImage: icon).interpolation(.none), in: CGRect(x: x * s, y: y * s, width: size * s, height: size * s))
+        }
+        let ly = y + ((size - 5) / 2).rounded()
+        MicroFont.draw(label(w.multiplier), x: x + size + 2, y: ly + 1, color: Self.shadow, ctx: ctx, s: s)
+        MicroFont.draw(label(w.multiplier), x: x + size + 1, y: ly, color: Color(white: 0.97), ctx: ctx, s: s)
+    }
+
+    /// A switch-screen slot: the foes' type that hits this member hardest, and how hard (red worse, green better).
     private func drawHint(_ hint: BattleOverlayState.PartyHint, at p: CGPoint, ctx: GraphicsContext, s: CGFloat) {
         if let icon = overlay.typeIcons[hint.type] {
             ctx.draw(Image(uiImage: icon).interpolation(.none), in: CGRect(x: p.x * s, y: (p.y - 1) * s, width: 8 * s, height: 8 * s))
         }
-        let label = "x" + MicroFont.number(hint.multiplier)
         let color = hint.multiplier > 1 ? Color(red: 1, green: 150 / 255, blue: 132 / 255)
                                         : Color(red: 150 / 255, green: 1, blue: 170 / 255)
-        MicroFont.draw(label, x: p.x + 10, y: p.y + 2, color: Color(red: 16 / 255, green: 16 / 255, blue: 32 / 255), ctx: ctx, s: s)
-        MicroFont.draw(label, x: p.x + 9, y: p.y + 1, color: color, ctx: ctx, s: s)
+        MicroFont.draw(label(hint.multiplier), x: p.x + 10, y: p.y + 2, color: Self.shadow, ctx: ctx, s: s)
+        MicroFont.draw(label(hint.multiplier), x: p.x + 9, y: p.y + 1, color: color, ctx: ctx, s: s)
     }
 
-    /// Under a move's name: a short line in the effectiveness colour, then the multiplier.
-    private func drawTag(_ m: Double, at p: CGPoint, ctx: GraphicsContext, s: CGFloat) {
-        let color = Self.color(m)
-        ctx.fill(Path(CGRect(x: p.x * s, y: (p.y + 1) * s, width: 10 * s, height: 3 * s)), with: .color(color))
-        MicroFont.draw("x" + MicroFont.number(m), x: p.x + 12, y: p.y, color: color, ctx: ctx, s: s)
+    /// Under a move's name: a short line in the effectiveness colour, then the multiplier. In doubles, one multiplier
+    /// per foe, upper HP box first ("x2/x0.5"); the line takes the better one's colour.
+    private func drawTag(_ ms: [Double], at p: CGPoint, ctx: GraphicsContext, s: CGFloat) {
+        guard let best = ms.max() else { return }
+        ctx.fill(Path(CGRect(x: p.x * s, y: (p.y + 1) * s, width: 10 * s, height: 3 * s)), with: .color(Self.color(best)))
+        var x = p.x + 12
+        for (i, m) in ms.enumerated() {
+            if i > 0 {
+                MicroFont.draw("/", x: x, y: p.y, color: Self.color(1), ctx: ctx, s: s)
+                x += MicroFont.width("/") + 1
+            }
+            MicroFont.draw(label(m), x: x, y: p.y, color: Self.color(m), ctx: ctx, s: s)
+            x += MicroFont.width(label(m)) + 1
+        }
     }
 
     /// Readable on the white move menu: green super effective, grey neutral, orange and red resisted, pale grey none.
@@ -102,6 +152,7 @@ enum MicroFont {
         "6": ["111", "100", "111", "101", "111"], "7": ["111", "001", "010", "010", "010"],
         "8": ["111", "101", "111", "101", "111"], "9": ["111", "101", "111", "001", "111"],
         ".": ["0", "0", "0", "0", "1"], "x": ["000", "101", "010", "101", "000"],
+        "/": ["001", "001", "010", "100", "100"],
     ]
 
     /// "4", "2", "1", "0.5", "0.25", "0".

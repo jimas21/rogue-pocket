@@ -1,32 +1,41 @@
 import Foundation
 import UIKit
 
-/// What the battle overlay draws, in GBA pixels. Facts the player could look up, nothing more: the enemy's
-/// weaknesses above its HP box, each damaging move's effectiveness under its name in the move menu, and on the
-/// switch screen how hard the enemy's own types hit each party member.
+/// What the battle overlay draws, in GBA pixels. Facts the player could look up, nothing more: each foe's weaknesses
+/// beside its HP box, each damaging move's effectiveness under its name in the move menu, and on the switch screen how
+/// hard the foes' own types hit each party member. Singles and doubles.
 struct BattleOverlayState: Equatable {
     struct Weakness: Equatable {
         let type: Int
         let multiplier: Double
     }
 
-    struct MoveTag: Equatable {
-        let slot: Int          // 0...3, the move's place in the menu
-        let multiplier: Double
+    /// One foe on the field: battler 1 (the only one in singles; the upper HP box in doubles), then battler 3.
+    struct Foe: Equatable {
+        let battler: Int
+        /// The species the screen shows (an Illusion's disguise while it holds).
+        let species: Int
+        let types: [Int]
+        /// Top-left corner of its HP box (follows it as it slides in); nil while that box is not on screen.
+        var box: CGPoint?
+        let weaknesses: [Weakness]
     }
 
-    /// Top-left corner of the enemy's HP box (follows it as it slides in); nil while it is not on screen.
-    var enemyBox: CGPoint?
-    var weaknesses: [Weakness] = []
-    /// Only while the move menu is open.
-    var moveTags: [MoveTag] = []
+    struct MoveTag: Equatable {
+        let slot: Int                // 0...3, the move's place in the menu
+        let multipliers: [Double]    // one per foe, in `foes` order
+    }
 
     struct PartyHint: Equatable {
         let slot: Int          // 0...5, as the switch screen lists them
-        let type: Int          // the enemy's type that hits this member hardest
+        let type: Int          // the foes' type that hits this member hardest
         let multiplier: Double
     }
 
+    var doubles = false
+    var foes: [Foe] = []
+    /// Only while the move menu is open.
+    var moveTags: [MoveTag] = []
     /// The switch screen is up: the weaknesses go top left, and members get a hint when that hit is not neutral.
     var partyMenu = false
     var partyHints: [PartyHint] = []
@@ -151,58 +160,71 @@ enum BattleReader {
     private static let healthboxSpriteIds: UInt32 = 0x0300_22DC
     private static let sprites: UInt32 = 0x0203_C690             // struct Sprite[64], 68 bytes each
 
-    /// nil outside a singles battle. `previous` is kept when the enemy slot is mid-swap (see below).
+    /// nil outside a battle. `previous` is kept while a foe's slot is mid-swap (see below).
     static func read(_ core: MGBACore, data: TypeData, previous: BattleOverlayState?) -> BattleOverlayState? {
         guard let main = core.readMemory(address: gMain, length: 0x43A), main[0x439] & 2 != 0,
               u32(main, 4) == battleMainCB2 || u32(main, 4) == partyMenuCB2,
-              core.readMemory(address: battlersCount, length: 1)?.first == 2,
-              let mons = core.readMemory(address: battleMons, length: 96 * 2) else { return nil }
-        let enemy = Array(mons[96..<192])
-
-        // The AI copies party members into gBattleMons while it weighs a switch. The real occupant has the
-        // personality of the party slot gBattlerPartyIndexes names; a read mid-swap keeps what was shown.
-        guard let idx = core.readMemory(address: battlerPartyIndexes + 2, length: 2).map({ Int(u16($0, 0)) }),
-              idx < 6, let slot = core.readMemory(address: enemyParty + UInt32(idx * 104), length: 4) else { return nil }
-        if u32(slot, 0) != u32(enemy, 76) { return previous }
-
+              let count = core.readMemory(address: battlersCount, length: 1)?.first, count == 2 || count == 4,
+              let mons = core.readMemory(address: battleMons, length: 96 * Int(count)),
+              let indexes = core.readMemory(address: battlerPartyIndexes, length: 8) else { return nil }
         var state = BattleOverlayState()
         state.partyMenu = u32(main, 4) == partyMenuCB2
-        var types = [Int(enemy[34]), Int(enemy[35]), Int(enemy[36])]
+        state.doubles = count == 4
+        let structPtr = core.readMemory(address: battleStructPtr, length: 4).map { u32($0, 0) }
+        let boxIds = core.readMemory(address: healthboxSpriteIds, length: 4)
 
-        // The enemy's HP box: its sprite must be in use, shown, and owned by battler 1 (at a battle's start the id
-        // slots still point at the previous scene's sprites). The switch screen reuses those sprites: skip it there.
-        if !state.partyMenu, let ids = core.readMemory(address: healthboxSpriteIds, length: 2), ids[1] < 64,
-           let sprite = core.readMemory(address: sprites + UInt32(ids[1]) * 68, length: 68) {
-            let flags = u16(sprite, 62)
-            if flags & 1 != 0, flags & 4 == 0, s16(sprite, 58) == 1 {
-                let x = Int(s16(sprite, 0x20)) + Int(s16(sprite, 0x24)) + Int(Int8(bitPattern: sprite[0x28]))
-                let y = Int(s16(sprite, 0x22)) + Int(s16(sprite, 0x26)) + Int(Int8(bitPattern: sprite[0x29]))
-                state.enemyBox = CGPoint(x: x, y: y)
+        for b in state.doubles ? [1, 3] : [1] {
+            let mon = Array(mons[(96 * b)..<(96 * b + 96)])
+            let species = Int(u16(mon, 0))
+            guard species > 0, u16(mon, 42) > 0 else { continue }   // not there, or fainted
+
+            // The AI copies party members into gBattleMons while it weighs a switch. The real occupant has the
+            // personality of the party slot gBattlerPartyIndexes names; a read mid-swap keeps what was shown.
+            let idx = Int(u16(indexes, 2 * b))
+            guard idx < 6, let slot = core.readMemory(address: enemyParty + UInt32(idx * 104), length: 4) else { continue }
+            if u32(slot, 0) != u32(mon, 76) { return previous }
+
+            // Illusion: while it holds, the game rates moves against the disguise's species types, so the overlay
+            // does too. Hiding anything would itself give the disguise away.
+            var types = [Int(mon[34]), Int(mon[35]), Int(mon[36])]
+            var shown = species
+            if let ptr = structPtr,
+               let il = core.readMemory(address: ptr &+ 660 &+ UInt32(8 * b), length: 4),
+               il[0] != 0, il[1] != 0, il[2] == 0, Int(il[3]) < 6,
+               let disguise = partyMon(core, base: enemyParty, slot: Int(il[3]))?.species,
+               let disguiseTypes = data.speciesTypes[disguise] {
+                types = disguiseTypes
+                shown = disguise
             }
-        }
 
-        // Illusion: while it holds, the game rates moves against the disguise's species types, so the overlay does
-        // too. Hiding anything would itself give the disguise away.
-        if let ptr = core.readMemory(address: battleStructPtr, length: 4).map({ u32($0, 0) }),
-           let il = core.readMemory(address: ptr &+ 660 &+ 8, length: 4),
-           il[0] != 0, il[1] != 0, il[2] == 0, Int(il[3]) < 6,
-           let shown = partyMon(core, base: enemyParty, slot: Int(il[3]))?.species,
-           let disguise = data.speciesTypes[shown] {
-            types = disguise
+            // Its HP box: the sprite must be in use, shown, and owned by this battler (at a battle's start the id
+            // slots still point at the previous scene's sprites). The switch screen reuses those sprites: skip it.
+            var box: CGPoint?
+            if !state.partyMenu, let ids = boxIds, ids[b] < 64,
+               let sprite = core.readMemory(address: sprites + UInt32(ids[b]) * 68, length: 68) {
+                let flags = u16(sprite, 62)
+                if flags & 1 != 0, flags & 4 == 0, Int(s16(sprite, 58)) == b {
+                    let x = Int(s16(sprite, 0x20)) + Int(s16(sprite, 0x24)) + Int(Int8(bitPattern: sprite[0x28]))
+                    let y = Int(s16(sprite, 0x22)) + Int(s16(sprite, 0x26)) + Int(Int8(bitPattern: sprite[0x29]))
+                    box = CGPoint(x: x, y: y)
+                }
+            }
+            let weak = (0..<19).compactMap { t -> BattleOverlayState.Weakness? in
+                guard t != 9 else { return nil }
+                let m = data.multiplier(t, against: types)
+                return m > 1 ? .init(type: t, multiplier: m) : nil
+            }.sorted { $0.multiplier != $1.multiplier ? $0.multiplier > $1.multiplier : $0.type < $1.type }
+            state.foes.append(.init(battler: b, species: shown, types: types, box: box, weaknesses: weak))
         }
-        state.weaknesses = (0..<19).compactMap { t -> BattleOverlayState.Weakness? in
-            guard t != 9 else { return nil }
-            let m = data.multiplier(t, against: types)
-            return m > 1 ? .init(type: t, multiplier: m) : nil
-        }.sorted { $0.multiplier != $1.multiplier ? $0.multiplier > $1.multiplier : $0.type < $1.type }
+        guard !state.foes.isEmpty else { return nil }
 
         // The switch screen lists gPlayerParty in its stored order (the game reorders the party for the menu).
         if state.partyMenu {
-            let count = min(Int(core.readMemory(address: playerParty - 3, length: 1)?.first ?? 0), 6)
-            let attacks = types.reduce(into: [Int]()) { list, t in
+            let party = min(Int(core.readMemory(address: playerParty - 3, length: 1)?.first ?? 0), 6)
+            let attacks = state.foes.flatMap(\.types).reduce(into: [Int]()) { list, t in
                 if t != 9 && !list.contains(t) { list.append(t) }
             }
-            for slot in 0..<count {
+            for slot in 0..<party {
                 guard let mon = partyMon(core, base: playerParty, slot: slot), !mon.isEgg,
                       let memberTypes = data.speciesTypes[mon.species] else { continue }
                 let ability = data.memberAbility(species: mon.species, abilityNum: mon.abilityNum)
@@ -214,14 +236,15 @@ enum BattleReader {
             return state
         }
 
-        // The move menu (battler 0 in singles): every damaging move gets its multiplier against the enemy.
-        if let funcs = core.readMemory(address: controllerFuncs, length: 4), u32(funcs, 0) == handleInputChooseMove {
-            let mine = Array(mons[0..<96])
+        // The move menu (battler 0, or 2 for the second Pokemon in doubles): every damaging move gets its multiplier
+        // against each foe.
+        if let funcs = core.readMemory(address: controllerFuncs, length: 16),
+           let me = (state.doubles ? [0, 2] : [0]).first(where: { u32(funcs, 4 * $0) == handleInputChooseMove }) {
+            let mine = Array(mons[(96 * me)..<(96 * me + 96)])
             for i in 0..<4 {
                 let move = Int(u16(mine, 12 + 2 * i))
-                if let m = data.moveMultiplier(move, against: types) {
-                    state.moveTags.append(.init(slot: i, multiplier: m))
-                }
+                let ms = state.foes.compactMap { data.moveMultiplier(move, against: $0.types) }
+                if ms.count == state.foes.count { state.moveTags.append(.init(slot: i, multipliers: ms)) }
             }
         }
         return state
@@ -269,6 +292,15 @@ final class BattleOverlay: ObservableObject {
     private var loading = false
     private var lastAttempt = Date.distantPast
     private var tick = 0
+    private var foeSprites: [Int: UIImage] = [:]
+
+    /// A foe's picture from the Dex download (sprites/<species>.png), to tell two foes apart on the switch screen.
+    func foeSprite(_ species: Int) -> UIImage? {
+        if let image = foeSprites[species] { return image }
+        guard let raw = DexStore.shared.file(at: "sprites/\(species).png"), let image = UIImage(data: raw) else { return nil }
+        foeSprites[species] = image
+        return image
+    }
 
     func framesDidRun(_ core: MGBACore) {
         tick += 1
