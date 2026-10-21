@@ -125,7 +125,11 @@ struct BattleOverlayView: View {
             ctx.draw(Image(uiImage: icon).interpolation(.none), in: CGRect(x: x * s, y: y * s, width: size * s, height: size * s))
         }
         let ly = y + ((size - 5) / 2).rounded()
-        MicroFont.draw(label(w.multiplier), x: x + size + 2, y: ly + 1, color: Self.shadow, ctx: ctx, s: s)
+        // A full dark outline, not just a drop shadow: the labels sit on whatever the battle background is (pale sky
+        // on some routes), and must read on all of them.
+        for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (1, 1)] as [(CGFloat, CGFloat)] {
+            MicroFont.draw(label(w.multiplier), x: x + size + 1 + dx, y: ly + dy, color: Self.shadow, ctx: ctx, s: s)
+        }
         MicroFont.draw(label(w.multiplier), x: x + size + 1, y: ly, color: Color(white: 0.97), ctx: ctx, s: s)
     }
 
