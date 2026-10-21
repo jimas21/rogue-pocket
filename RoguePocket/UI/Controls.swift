@@ -74,12 +74,16 @@ struct ControllerPad: UIViewRepresentable {
     var avoid: CGRect = .null
     /// Floating D-pad: where the thumb lands on the D-pad's side becomes the pad's centre.
     var floating = false
+    /// The part of the view the controls are laid out in; the rest only catches the floating D-pad (landscape: the
+    /// view spans the whole left side of the screen, over half the picture).
+    var layoutInsets: UIEdgeInsets = .zero
 
     func makeUIView(context: Context) -> ControllerView {
         let view = ControllerView()
         view.configure(elements, id: layoutID)
         view.avoid = avoid
         view.floating = floating
+        view.layoutInsets = layoutInsets
         let emu = emulator
         let source = layoutID
         view.onKeys = { keys in emu.setTouchKeys(keys, from: source) }
@@ -91,6 +95,7 @@ struct ControllerPad: UIViewRepresentable {
         uiView.configure(elements, id: layoutID) // no-op unless the layout changed
         uiView.avoid = avoid
         uiView.floating = floating
+        uiView.layoutInsets = layoutInsets
     }
 
     static func dismantleUIView(_ uiView: ControllerView, coordinator: ()) {
@@ -110,6 +115,11 @@ final class ControllerView: UIView {
     var floating = false {
         didSet { if floating != oldValue { releaseAll(); setNeedsLayout() } }
     }
+    /// See ControllerPad.layoutInsets.
+    var layoutInsets: UIEdgeInsets = .zero {
+        didSet { if layoutInsets != oldValue { setNeedsLayout() } }
+    }
+    private var area: CGRect { bounds.inset(by: layoutInsets) }
     /// The finger driving the floating D-pad, if any.
     private var floatID: ObjectIdentifier?
 
@@ -195,10 +205,10 @@ final class ControllerView: UIView {
         // (the D-pad may keep a corner there; it reads direction by angle, so the rest of that arm still works).
         guard !avoid.isNull, r.intersects(avoid) else { return r }
         var moved = r
-        if avoid.minX <= bounds.minX {
-            moved.origin.x = min(avoid.maxX, bounds.maxX - r.width)
+        if avoid.minX <= area.minX {
+            moved.origin.x = max(area.minX, min(avoid.maxX, area.maxX - r.width))
         } else {
-            moved.origin.x = max(avoid.minX - r.width, bounds.minX)
+            moved.origin.x = min(area.maxX - r.width, max(avoid.minX - r.width, area.minX))
         }
         let blocked = elements.contains { other in
             let f = baseFrame(of: other)
@@ -211,10 +221,10 @@ final class ControllerView: UIView {
         var size = element.size
         if case .dpad = element.kind {
             // Shrink the D-pad on short pads (small phones, landscape) so it never runs into L/R or Select/Start.
-            let side = max(90, min(size.width, bounds.height * 0.62, bounds.width))
+            let side = max(90, min(size.width, area.height * 0.62, area.width))
             size = CGSize(width: side, height: side)
         }
-        let c = CGPoint(x: element.center.x * bounds.width, y: element.center.y * bounds.height)
+        let c = CGPoint(x: area.minX + element.center.x * area.width, y: area.minY + element.center.y * area.height)
         return CGRect(x: c.x - size.width / 2, y: c.y - size.height / 2, width: size.width, height: size.height)
     }
 
@@ -335,10 +345,17 @@ final class ControllerView: UIView {
         return nil
     }
 
-    /// The floating D-pad's area: the pad's whole side up to just past the resting D-pad, minus the buttons.
+    /// The floating D-pad's area, minus the buttons: the whole view when it reaches past the controls (landscape),
+    /// else the D-pad's half of it.
     private func inFloatZone(_ p: CGPoint, rest: CGRect) -> Bool {
         guard bounds.contains(p), button(at: p, slack: 0).isEmpty else { return false }
-        return rest.midX <= bounds.midX ? p.x <= rest.maxX + 20 : p.x >= rest.minX - 20
+        if area != bounds { return true }
+        return rest.midX <= bounds.midX ? p.x <= bounds.midX : p.x >= bounds.midX
+    }
+
+    /// Only the controls' own area takes touches, unless the floating D-pad may start anywhere in the view.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        floating ? bounds.contains(point) : area.contains(point)
     }
 
     private func showFloat(_ pad: CGRect) {

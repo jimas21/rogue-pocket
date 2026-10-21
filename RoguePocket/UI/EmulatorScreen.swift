@@ -108,24 +108,29 @@ struct EmulatorScreen: View {
         let side = (size.width - pictureWidth) / 2
         let pad = side - margin
         let island = islandArea(height: size.height, inset: inset)
-        // The island rect in each pad's own coordinates (pads start `margin` in from the screen edge).
-        let leftAvoid = island.onLeft ? island.rect.offsetBy(dx: -margin, dy: 0) : .null
+        // The island rect in each pad's own coordinates.
+        let leftAvoid = island.onLeft ? island.rect : .null // the left pad starts at the screen edge
         let rightAvoid = island.onLeft ? .null : island.rect.offsetBy(dx: pad + margin - island.rect.width, dy: 0)
-        return HStack(spacing: 0) {
+        return ZStack(alignment: .leading) {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: side)
+                picture
+                    .frame(width: pictureWidth)
+                ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu, avoid: rightAvoid)
+                    .frame(width: pad)
+                    .padding(.trailing, margin)
+            }
+            // The left pad spans the whole left side of the screen, over the left half of the picture: the controls
+            // sit in its column, and the floating D-pad can start anywhere in it (and draws over the picture).
             ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu, avoid: leftAvoid,
-                          floating: floatingDpad)
-                .frame(width: pad)
-                .overlay(alignment: .top) {
+                          floating: floatingDpad,
+                          layoutInsets: UIEdgeInsets(top: 0, left: margin, bottom: 0, right: pictureWidth / 2))
+                .frame(width: side + pictureWidth / 2)
+                .overlay(alignment: .topLeading) {
                     // Low in the column, under Select (see PadLayout.landscapeLeft).
-                    gameMenu.padding(.top, size.height * 0.76 - 22)
+                    gameMenu.padding(.top, size.height * 0.76 - 22).padding(.leading, margin + pad / 2 - 22)
                 }
-                .padding(.leading, margin)
-                .zIndex(1) // a floating D-pad that slides past the column's edge draws over the picture
-            picture
-                .frame(width: pictureWidth)
-            ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu, avoid: rightAvoid)
-                .frame(width: pad)
-                .padding(.trailing, margin)
+                .zIndex(1)
         }
     }
 
