@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The game, full screen (presented as a cover: no back-swipe for a thumb on the D-pad to trigger by accident).
-/// Portrait: picture across the full width, the Dex strip, then the controls. Landscape: the picture at full height,
-/// a control column on each side reaching the screen edges. Controls move off the Dynamic Island (it is a hole in
+/// Portrait: picture across the full width, the Dex strip, then the controls. Landscape: a control column on each side
+/// inside the safe area and the biggest picture between them. Controls move off the Dynamic Island (it is a hole in
 /// the screen; touches there never register) and never sit over the picture.
 struct EmulatorScreen: View {
     @ObservedObject var emu: Emulator
@@ -100,22 +100,29 @@ struct EmulatorScreen: View {
     }
 
     private func landscape(_ size: CGSize, inset: CGFloat) -> some View {
-        let pictureWidth = max(240, min(size.width - 2 * Self.sideColumn, size.height * 1.5))
+        // Controls stay inside the safe area (an edge margin as wide as the inset), closer to the picture: at the
+        // screen edges they felt too far out. The picture takes what is left, up to full height.
+        let margin = inset
+        let pictureWidth = max(240, min(size.width - 2 * (margin + Self.sideColumn), size.height * 1.5))
         let side = (size.width - pictureWidth) / 2
+        let pad = side - margin
         let island = islandArea(height: size.height, inset: inset)
+        // The island rect in each pad's own coordinates (pads start `margin` in from the screen edge).
+        let leftAvoid = island.onLeft ? island.rect.offsetBy(dx: -margin, dy: 0) : .null
+        let rightAvoid = island.onLeft ? .null : island.rect.offsetBy(dx: pad + margin - island.rect.width, dy: 0)
         return HStack(spacing: 0) {
-            ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu,
-                          avoid: island.onLeft ? island.rect : .null)
-                .frame(width: side)
+            ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu, avoid: leftAvoid)
+                .frame(width: pad)
                 .overlay(alignment: .top) {
                     // Low in the column, between the D-pad and Select (see PadLayout.landscapeLeft).
                     gameMenu.padding(.top, size.height * 0.76 - 22)
                 }
+                .padding(.leading, margin)
             picture
                 .frame(width: pictureWidth)
-            ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu,
-                          avoid: island.onLeft ? .null : island.rect.offsetBy(dx: side - island.rect.width, dy: 0))
-                .frame(width: side)
+            ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu, avoid: rightAvoid)
+                .frame(width: pad)
+                .padding(.trailing, margin)
         }
     }
 
