@@ -146,15 +146,16 @@ final class TypeData {
     }
 }
 
-/// Reads the battle screen from emulated memory. Addresses are from the stock Emerald Rogue EX v2.2.1 ROM; the
-/// function pointers (BattleMainCB2, HandleInputChooseMove) were read from the running game.
+/// Reads the battle screen from emulated memory. Data addresses are the stock Emerald Rogue EX v2.2.1 map's and match
+/// every build seen so far; function addresses (BattleMainCB2, CB2_UpdatePartyMenu, HandleInputChooseMove) differ
+/// between builds, so each known build's are listed (read from the running game).
 enum BattleReader {
     private static let gMain: UInt32 = 0x0300_14B4               // .callback2 at +4, .inBattle bit 1 of +0x439
-    private static let battleMainCB2: UInt32 = 0x0807_E6A1
-    private static let partyMenuCB2: UInt32 = 0x0815_B225          // CB2_UpdatePartyMenu (the switch screen in battle)
+    private static let battleMainCB2: Set<UInt32> = [0x0807_E6A1, 0x0807_FCAD]
+    private static let partyMenuCB2: Set<UInt32> = [0x0815_B225, 0x0815_DF99]   // the switch screen in battle
     private static let playerParty: UInt32 = 0x0203_6C7C          // struct Pokemon[6]; gPlayerPartyCount 3 bytes before
     private static let controllerFuncs: UInt32 = 0x0300_2244     // gBattlerControllerFuncs[4]
-    private static let handleInputChooseMove: UInt32 = 0x0805_A6C5
+    private static let handleInputChooseMove: Set<UInt32> = [0x0805_A6C5, 0x0805_BB19]
     private static let battlersCount: UInt32 = 0x0201_C33C
     private static let battlerPartyIndexes: UInt32 = 0x0201_C340 // u16[4]
     private static let battleMons: UInt32 = 0x0201_C358          // struct BattlePokemon[4], 96 bytes each
@@ -166,12 +167,12 @@ enum BattleReader {
     /// nil outside a battle. `previous` is kept while a foe's slot is mid-swap (see below).
     static func read(_ core: MGBACore, data: TypeData, previous: BattleOverlayState?) -> BattleOverlayState? {
         guard let main = core.readMemory(address: gMain, length: 0x43A), main[0x439] & 2 != 0,
-              u32(main, 4) == battleMainCB2 || u32(main, 4) == partyMenuCB2,
+              battleMainCB2.contains(u32(main, 4)) || partyMenuCB2.contains(u32(main, 4)),
               let count = core.readMemory(address: battlersCount, length: 1)?.first, count == 2 || count == 4,
               let mons = core.readMemory(address: battleMons, length: 96 * Int(count)),
               let indexes = core.readMemory(address: battlerPartyIndexes, length: 8) else { return nil }
         var state = BattleOverlayState()
-        state.partyMenu = u32(main, 4) == partyMenuCB2
+        state.partyMenu = partyMenuCB2.contains(u32(main, 4))
         state.doubles = count == 4
         let structPtr = core.readMemory(address: battleStructPtr, length: 4).map { u32($0, 0) }
         let boxIds = core.readMemory(address: healthboxSpriteIds, length: 4)
@@ -255,7 +256,7 @@ enum BattleReader {
         // The move menu (battler 0, or 2 for the second Pokemon in doubles): every damaging move gets its multiplier
         // against each foe.
         if let funcs = core.readMemory(address: controllerFuncs, length: 16),
-           let me = (state.doubles ? [0, 2] : [0]).first(where: { u32(funcs, 4 * $0) == handleInputChooseMove }) {
+           let me = (state.doubles ? [0, 2] : [0]).first(where: { handleInputChooseMove.contains(u32(funcs, 4 * $0)) }) {
             let mine = Array(mons[(96 * me)..<(96 * me + 96)])
             for i in 0..<4 {
                 let move = Int(u16(mine, 12 + 2 * i))
@@ -270,7 +271,7 @@ enum BattleReader {
     static func probe(_ core: MGBACore) -> String {
         guard let main = core.readMemory(address: gMain, length: 0x43A) else { return "gMain unreadable" }
         let cb2 = u32(main, 4)
-        let screen = cb2 == battleMainCB2 ? "battle" : cb2 == partyMenuCB2 ? "switch" : String(cb2, radix: 16)
+        let screen = battleMainCB2.contains(cb2) ? "battle" : partyMenuCB2.contains(cb2) ? "switch" : String(cb2, radix: 16)
         var out = "cb2 \(screen) inBattle \(main[0x439] & 2 != 0)"
         guard let count = core.readMemory(address: battlersCount, length: 1)?.first else { return out }
         out += " battlers \(count)"

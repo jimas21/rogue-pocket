@@ -77,12 +77,15 @@ struct EmulatorScreen: View {
     private var portrait: some View {
         VStack(spacing: 8) {
             picture
-            Button {
-                showDex = true
-            } label: {
-                DexStrip(memory: memory, overlay: emu.overlay)
+            HStack(spacing: 8) {
+                Button {
+                    showDex = true
+                } label: {
+                    DexStrip(memory: memory, overlay: emu.overlay)
+                }
+                .buttonStyle(.plain)
+                gameMenu
             }
-            .buttonStyle(.plain)
             .padding(.horizontal, 10)
             ControllerPad(elements: PadLayout.portrait, layoutID: "portrait", emulator: emu)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -98,17 +101,20 @@ struct EmulatorScreen: View {
                 .frame(width: side)
                 .overlay(alignment: .top) {
                     // In the gap between L and the D-pad (see PadLayout.landscapeLeft).
-                    if memory.facts != nil {
-                        Button {
-                            showMemory.toggle()
-                        } label: {
-                            Image(systemName: showMemory ? "list.bullet.circle.fill" : "list.bullet.circle")
-                                .font(.system(size: 26))
-                                .foregroundStyle(.white.opacity(0.8))
-                                .frame(width: 44, height: 44)
+                    HStack(spacing: 8) {
+                        if memory.facts != nil {
+                            Button {
+                                showMemory.toggle()
+                            } label: {
+                                Image(systemName: showMemory ? "list.bullet.circle.fill" : "list.bullet.circle")
+                                    .font(.system(size: 26))
+                                    .foregroundStyle(.white.opacity(0.8))
+                                    .frame(width: 44, height: 44)
+                            }
                         }
-                        .padding(.top, size.height * 0.12 + 24)
+                        gameMenu
                     }
+                    .padding(.top, size.height * 0.12 + 24)
                 }
             picture
                 .frame(width: pictureWidth)
@@ -141,9 +147,6 @@ struct EmulatorScreen: View {
                         .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
                         .padding(4)
                 }
-            }
-            .overlay(alignment: .topTrailing) {
-                gameMenu.padding(6)
             }
             .overlay(alignment: .topLeading) {
                 if emu.fastForward {
@@ -222,10 +225,11 @@ struct EmulatorScreen: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
-                .background(.black.opacity(0.45), in: Circle())
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(Color(red: 191 / 255, green: 245 / 255, blue: 215 / 255))
+                .frame(width: 44, height: 44)
+                .background(Color(red: 22 / 255, green: 33 / 255, blue: 29 / 255), in: Circle())
+                .overlay(Circle().strokeBorder(Color(red: 64 / 255, green: 214 / 255, blue: 140 / 255).opacity(0.5), lineWidth: 1.5))
         }
     }
 
