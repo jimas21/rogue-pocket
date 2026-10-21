@@ -24,10 +24,10 @@ struct BattleOverlayView: View {
             if state.doubles {
                 drawDoublesWeaknesses(state.foes, ctx: ctx, s: s)
             } else if let foe = state.foes.first, let box = foe.box {
-                // Singles: a row on the empty background above its HP box, ending before its sprite (x 144): its own
-                // types, a thin divider, then what it is weak to.
-                let x = drawTypes(foe.types, x: box.x + 2, y: box.y - 12, icon: 10, ctx: ctx, s: s)
-                drawRow(foe.weaknesses, x: x, y: box.y - 12, icon: 10, end: 143, ctx: ctx, s: s)
+                // Singles: its own types small, inside its HP box in the dark band between the Poke Ball mark and
+                // "HP"; what it is weak to on the empty background above the box, ending before its sprite (x 144).
+                drawTypes(foe.types, x: box.x + 15, y: box.y + 17, icon: 6, gap: 0, divider: false, ctx: ctx, s: s)
+                drawRow(foe.weaknesses, x: box.x + 2, y: box.y - 12, icon: 10, end: 143, ctx: ctx, s: s)
             }
             if let box = state.playerBox, !state.playerTypes.isEmpty {
                 // Your types in your HP box's empty corner, right of where a status (PSN, BRN...) appears.
@@ -87,8 +87,8 @@ struct BattleOverlayView: View {
     /// A Pokemon's own types (a repeated type and the empty third type drawn once / not at all), then optionally a thin
     /// divider before what follows. Returns where the next thing starts.
     @discardableResult
-    private func drawTypes(_ types: [Int], x start: CGFloat, y: CGFloat, icon size: CGFloat, divider: Bool = true,
-                           ctx: GraphicsContext, s: CGFloat) -> CGFloat {
+    private func drawTypes(_ types: [Int], x start: CGFloat, y: CGFloat, icon size: CGFloat, gap: CGFloat = 1,
+                           divider: Bool = true, ctx: GraphicsContext, s: CGFloat) -> CGFloat {
         var shown: [Int] = []
         for t in types where t != 9 && !shown.contains(t) { shown.append(t) }
         var x = start
@@ -96,7 +96,7 @@ struct BattleOverlayView: View {
             if let icon = overlay.typeIcons[t] {
                 ctx.draw(Image(uiImage: icon).interpolation(.none), in: CGRect(x: x * s, y: y * s, width: size * s, height: size * s))
             }
-            x += size + 1
+            x += size + gap
         }
         guard divider, !shown.isEmpty else { return x }
         ctx.fill(Path(CGRect(x: (x + 1) * s, y: (y + 1) * s, width: s, height: (size - 2) * s)),
@@ -107,7 +107,7 @@ struct BattleOverlayView: View {
     /// A row of weaknesses: each type's icon, then its multiplier. Tightens when there are many.
     private func drawRow(_ list: [BattleOverlayState.Weakness], x start: CGFloat, y top: CGFloat, icon size: CGFloat,
                          end: CGFloat, ctx: GraphicsContext, s: CGFloat) {
-        let layouts: [(icon: CGFloat, gap: CGFloat)] = [(size, 4), (size, 2), (8, 2), (8, 1)]
+        let layouts: [(icon: CGFloat, gap: CGFloat)] = [(size, 2), (size, 1), (8, 1), (8, 0)]   // close together
         let layout = layouts.first { l in
             start + list.reduce(CGFloat(0)) { $0 + l.icon + 1 + MicroFont.width(label($1.multiplier)) + l.gap } <= end
         } ?? layouts[layouts.count - 1]
