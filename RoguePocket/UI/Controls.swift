@@ -45,18 +45,20 @@ enum PadLayout {
         .button(.start, "Start", x: 0.60, y: 0.87, w: 74, h: 30),
     ]
 
-    /// Landscape: a pad on each side of the picture.
+    /// Landscape: a pad on each side of the picture. D-pad and A/B sit high, where the thumbs rest; Select/Start and
+    /// the app's own buttons (the menu, beside the left pad; fast forward) sit low, out of the way.
     static let landscapeLeft: [PadElement] = [
-        .button(.l, "L", x: 0.5, y: 0.12, w: 92, h: 38, round: false),
-        .dpad(x: 0.5, y: 0.53, side: 140),
+        .button(.l, "L", x: 0.5, y: 0.10, w: 92, h: 38, round: false),
+        .dpad(x: 0.5, y: 0.36, side: 140),
         .button(.select, "Select", x: 0.5, y: 0.90, w: 74, h: 30),
     ]
 
+    /// A and B side by side with a slight tilt (B lower left, A upper right), like the GBA.
     static let landscapeRight: [PadElement] = [
-        .button(.r, "R", x: 0.5, y: 0.12, w: 92, h: 38, round: false),
-        .fastForward(x: 0.5, y: 0.25),
-        .button(.a, "A", x: 0.72, y: 0.43, w: 60, h: 60),
-        .button(.b, "B", x: 0.30, y: 0.61, w: 60, h: 60),
+        .button(.r, "R", x: 0.5, y: 0.10, w: 92, h: 38, round: false),
+        .button(.a, "A", x: 0.74, y: 0.31, w: 62, h: 62),
+        .button(.b, "B", x: 0.27, y: 0.38, w: 62, h: 62),
+        .fastForward(x: 0.5, y: 0.76),
         .button(.start, "Start", x: 0.5, y: 0.90, w: 74, h: 30),
     ]
 }
@@ -66,10 +68,13 @@ struct ControllerPad: UIViewRepresentable {
     let elements: [PadElement]
     let layoutID: String
     let emulator: Emulator
+    /// A part of the pad no touch reaches (the Dynamic Island or notch, in landscape). Controls move off it.
+    var avoid: CGRect = .null
 
     func makeUIView(context: Context) -> ControllerView {
         let view = ControllerView()
         view.configure(elements, id: layoutID)
+        view.avoid = avoid
         let emu = emulator
         let source = layoutID
         view.onKeys = { keys in emu.setTouchKeys(keys, from: source) }
@@ -79,6 +84,7 @@ struct ControllerPad: UIViewRepresentable {
 
     func updateUIView(_ uiView: ControllerView, context: Context) {
         uiView.configure(elements, id: layoutID) // no-op unless the layout changed
+        uiView.avoid = avoid
     }
 
     static func dismantleUIView(_ uiView: ControllerView, coordinator: ()) {
@@ -90,6 +96,10 @@ final class ControllerView: UIView {
     var onKeys: ((GBAKeys) -> Void)?
     /// Fast forward: a quick tap toggles it, a hold runs it only while held.
     var onFastForward: ((Bool) -> Void)?
+    /// See ControllerPad.avoid.
+    var avoid: CGRect = .null {
+        didSet { if avoid != oldValue { setNeedsLayout() } }
+    }
 
     private var elements: [PadElement] = []
     private var layoutID = ""
@@ -164,6 +174,24 @@ final class ControllerView: UIView {
     }
 
     private func frame(of element: PadElement) -> CGRect {
+        let r = baseFrame(of: element)
+        // Slide sideways off the dead area, as far as the pad allows, unless that would run into another control
+        // (the D-pad may keep a corner there; it reads direction by angle, so the rest of that arm still works).
+        guard !avoid.isNull, r.intersects(avoid) else { return r }
+        var moved = r
+        if avoid.minX <= bounds.minX {
+            moved.origin.x = min(avoid.maxX, bounds.maxX - r.width)
+        } else {
+            moved.origin.x = max(avoid.minX - r.width, bounds.minX)
+        }
+        let blocked = elements.contains { other in
+            let f = baseFrame(of: other)
+            return f != r && f.intersects(moved)
+        }
+        return blocked ? r : moved
+    }
+
+    private func baseFrame(of element: PadElement) -> CGRect {
         var size = element.size
         if case .dpad = element.kind {
             // Shrink the D-pad on short pads (small phones, landscape) so it never runs into L/R or Select/Start.

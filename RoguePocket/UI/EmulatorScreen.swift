@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// The game, full screen (presented as a cover: no back-swipe for a thumb on the D-pad to trigger by accident).
-/// Portrait: picture across the full width, the Dex strip, then the controls. Landscape: the biggest picture that
-/// still leaves room for a control column on each side INSIDE the safe area, so nothing sits under the Dynamic
-/// Island (it is a hole in the screen; touches there never register) or over the picture.
+/// Portrait: picture across the full width, the Dex strip, then the controls. Landscape: the picture at full height,
+/// a control column on each side reaching the screen edges. Controls move off the Dynamic Island (it is a hole in
+/// the screen; touches there never register) and never sit over the picture.
 struct EmulatorScreen: View {
     @ObservedObject var emu: Emulator
     @ObservedObject var sync: SyncManager
@@ -14,11 +14,12 @@ struct EmulatorScreen: View {
     @AppStorage("colorCorrection") private var colorCorrection = true
     @State private var sheet: Sheet?
     @State private var showDex = false
-    /// What the foe has shown this battle: the strip in portrait, a panel on request in landscape.
+    /// What the foe has shown this battle, for the strip (portrait only).
     @StateObject private var memory = BattleMemory()
-    @State private var showMemory = false
+    /// Bumped when the phone turns, so the island side is read again (a half turn keeps the same size).
+    @State private var orientationTick = 0
 
-    /// Width of each control column in landscape.
+    /// Narrowest control column in landscape (wide screens, iPad).
     private static let sideColumn: CGFloat = 128
 
     enum Sheet: Identifiable {
@@ -40,15 +41,18 @@ struct EmulatorScreen: View {
     var body: some View {
         GeometryReader { geo in
             Group {
+                let insets = Self.safeInsets(geo)
                 if geo.size.width > geo.size.height {
-                    landscape(geo.size)
+                    landscape(geo.size, inset: max(insets.leading, insets.trailing))
                 } else {
-                    portrait
+                    portrait.padding(.top, insets.top)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .ignoresSafeArea(edges: .bottom) // the controls may use the home-indicator strip; that swipe is deferred
+        // The whole screen: the controls may use the home-indicator strip (that swipe is deferred) and, in
+        // landscape, the side strips beside the island.
+        .ignoresSafeArea()
         .background(Color(red: 15 / 255, green: 23 / 255, blue: 20 / 255).ignoresSafeArea())
         .sheet(item: $sync.choice) { choice in
             SaveChoiceView(choice: choice, sync: sync)
@@ -63,10 +67,12 @@ struct EmulatorScreen: View {
             while !Task.isCancelled {
                 await MainActor.run {
                     memory.refresh(from: dex.battleSnapshot(), data: emu.overlay.data)
-                    if memory.facts == nil { showMemory = false }
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { orientationTick += 1 }
         }
         .onAppear { emu.screenDidAppear() }
         .onDisappear { emu.screenDidDisappear() }
@@ -93,46 +99,49 @@ struct EmulatorScreen: View {
         .padding(.bottom, 6)
     }
 
-    private func landscape(_ size: CGSize) -> some View {
+    private func landscape(_ size: CGSize, inset: CGFloat) -> some View {
         let pictureWidth = max(240, min(size.width - 2 * Self.sideColumn, size.height * 1.5))
         let side = (size.width - pictureWidth) / 2
+        let island = islandArea(height: size.height, inset: inset)
         return HStack(spacing: 0) {
-            ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu)
+            ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu,
+                          avoid: island.onLeft ? island.rect : .null)
                 .frame(width: side)
                 .overlay(alignment: .top) {
-                    // In the gap between L and the D-pad (see PadLayout.landscapeLeft).
-                    HStack(spacing: 8) {
-                        if memory.facts != nil {
-                            Button {
-                                showMemory.toggle()
-                            } label: {
-                                Image(systemName: showMemory ? "list.bullet.circle.fill" : "list.bullet.circle")
-                                    .font(.system(size: 26))
-                                    .foregroundStyle(.white.opacity(0.8))
-                                    .frame(width: 44, height: 44)
-                            }
-                        }
-                        gameMenu
-                    }
-                    .padding(.top, size.height * 0.12 + 24)
+                    // Low in the column, between the D-pad and Select (see PadLayout.landscapeLeft).
+                    gameMenu.padding(.top, size.height * 0.76 - 22)
                 }
             picture
                 .frame(width: pictureWidth)
-                .overlay(alignment: .bottom) {
-                    if showMemory, let facts = memory.facts {
-                        BattleMemoryView(facts: facts, overlay: emu.overlay)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(red: 22 / 255, green: 33 / 255, blue: 29 / 255).opacity(0.94),
-                                        in: RoundedRectangle(cornerRadius: 12))
-                            .padding(8)
-                            .onTapGesture { showMemory = false }
-                    }
-                }
-            ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu)
+            ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu,
+                          avoid: island.onLeft ? .null : island.rect.offsetBy(dx: side - island.rect.width, dy: 0))
                 .frame(width: side)
         }
+    }
+
+    /// The screen's safe-area insets: the reader's own, or the window's if the reader reports none.
+    private static func safeInsets(_ geo: GeometryProxy) -> EdgeInsets {
+        var e = geo.safeAreaInsets
+        let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.keyWindow
+        if let w = window?.safeAreaInsets {
+            e.top = max(e.top, w.top)
+            e.leading = max(e.leading, w.left)
+            e.trailing = max(e.trailing, w.right)
+        }
+        return e
+    }
+
+    /// Where the Dynamic Island (or notch) sits in landscape, in a control column's coordinates, and on which side.
+    /// Only the strip beside it, centred on the height, is dead; above and below it touches work.
+    private func islandArea(height: CGFloat, inset: CGFloat) -> (rect: CGRect, onLeft: Bool) {
+        _ = orientationTick
+        guard inset > 30 else { return (.null, true) } // iPad, or no cutout
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        // landscapeRight = the top of the phone (the island) is on the left.
+        let onLeft = scene?.interfaceOrientation != .landscapeLeft
+        let half: CGFloat = inset >= 55 ? 66 : 112 // island ~126 pt tall; a notch ~210
+        let width = inset - 8
+        return (CGRect(x: 0, y: height / 2 - half, width: width, height: half * 2), onLeft)
     }
 
     private var picture: some View {
