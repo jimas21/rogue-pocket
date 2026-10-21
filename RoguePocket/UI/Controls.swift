@@ -45,12 +45,13 @@ enum PadLayout {
         .button(.start, "Start", x: 0.60, y: 0.87, w: 74, h: 30),
     ]
 
-    /// Landscape: a pad on each side of the picture. D-pad and A/B sit high, where the thumbs rest; Select/Start and
-    /// the app's own buttons (the menu, beside the left pad; fast forward) sit low, out of the way.
+    /// Landscape: a pad on each side of the picture. D-pad and A/B sit high, where the thumbs rest. Select/Start sit
+    /// under them on the side nearest the picture, away from the palm at the bottom outer corner; the app's own
+    /// buttons (the menu, beside the left pad; fast forward) sit low.
     static let landscapeLeft: [PadElement] = [
         .button(.l, "L", x: 0.5, y: 0.10, w: 92, h: 38, round: false),
         .dpad(x: 0.5, y: 0.36, side: 140),
-        .button(.select, "Select", x: 0.5, y: 0.90, w: 74, h: 30),
+        .button(.select, "Select", x: 0.68, y: 0.62, w: 74, h: 30),
     ]
 
     /// A and B side by side with a slight tilt (B lower left, A upper right), like the GBA.
@@ -58,8 +59,8 @@ enum PadLayout {
         .button(.r, "R", x: 0.5, y: 0.10, w: 92, h: 38, round: false),
         .button(.a, "A", x: 0.74, y: 0.31, w: 62, h: 62),
         .button(.b, "B", x: 0.27, y: 0.38, w: 62, h: 62),
+        .button(.start, "Start", x: 0.32, y: 0.62, w: 74, h: 30),
         .fastForward(x: 0.5, y: 0.76),
-        .button(.start, "Start", x: 0.5, y: 0.90, w: 74, h: 30),
     ]
 }
 

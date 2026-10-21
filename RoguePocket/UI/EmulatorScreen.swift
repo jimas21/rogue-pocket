@@ -114,7 +114,7 @@ struct EmulatorScreen: View {
             ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu, avoid: leftAvoid)
                 .frame(width: pad)
                 .overlay(alignment: .top) {
-                    // Low in the column, between the D-pad and Select (see PadLayout.landscapeLeft).
+                    // Low in the column, under Select (see PadLayout.landscapeLeft).
                     gameMenu.padding(.top, size.height * 0.76 - 22)
                 }
                 .padding(.leading, margin)
