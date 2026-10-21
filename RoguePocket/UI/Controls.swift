@@ -71,11 +71,14 @@ struct ControllerPad: UIViewRepresentable {
     let emulator: Emulator
     /// A part of the pad no touch reaches (the Dynamic Island or notch, in landscape). Controls move off it.
     var avoid: CGRect = .null
+    /// Floating D-pad: where the thumb lands on the D-pad's side becomes the pad's centre.
+    var floating = false
 
     func makeUIView(context: Context) -> ControllerView {
         let view = ControllerView()
         view.configure(elements, id: layoutID)
         view.avoid = avoid
+        view.floating = floating
         let emu = emulator
         let source = layoutID
         view.onKeys = { keys in emu.setTouchKeys(keys, from: source) }
@@ -86,6 +89,7 @@ struct ControllerPad: UIViewRepresentable {
     func updateUIView(_ uiView: ControllerView, context: Context) {
         uiView.configure(elements, id: layoutID) // no-op unless the layout changed
         uiView.avoid = avoid
+        uiView.floating = floating
     }
 
     static func dismantleUIView(_ uiView: ControllerView, coordinator: ()) {
@@ -101,6 +105,12 @@ final class ControllerView: UIView {
     var avoid: CGRect = .null {
         didSet { if avoid != oldValue { setNeedsLayout() } }
     }
+    /// See ControllerPad.floating. At rest the pad shows dimmed in its usual place, as a hint.
+    var floating = false {
+        didSet { if floating != oldValue { releaseAll(); setNeedsLayout() } }
+    }
+    /// The finger driving the floating D-pad, if any.
+    private var floatID: ObjectIdentifier?
 
     private var elements: [PadElement] = []
     private var layoutID = ""
@@ -171,6 +181,10 @@ final class ControllerView: UIView {
                 default: armView.frame = CGRect(x: s - len, y: (s - arm) / 2, width: len, height: arm)
                 }
             }
+            if floatID == nil { v.alpha = floating ? 0.45 : 1 }
+            if floatID != nil, case .dpad(let pad)? = floatID.flatMap({ bindings[$0] }) {
+                v.center = CGPoint(x: pad.midX, y: pad.midY)
+            }
         }
     }
 
@@ -228,6 +242,12 @@ final class ControllerView: UIView {
                 bindings[id] = .fastForward(Date())
                 ffHeld = true
                 touchKeys[id] = []
+            } else if floating, floatID == nil, let rest = dpadRest(), inFloatZone(p, rest: rest) {
+                let pad = CGRect(x: p.x - rest.width / 2, y: p.y - rest.height / 2, width: rest.width, height: rest.height)
+                bindings[id] = .dpad(pad)
+                floatID = id
+                showFloat(pad)
+                touchKeys[id] = []
             } else if let pad = dpadFrame(near: p) {
                 bindings[id] = .dpad(pad)
                 touchKeys[id] = direction(at: p, in: pad)
@@ -244,7 +264,18 @@ final class ControllerView: UIView {
             let p = t.location(in: self)
             let id = ObjectIdentifier(t)
             switch bindings[id] {
-            case .dpad(let pad): touchKeys[id] = direction(at: p, in: pad)
+            case .dpad(var pad):
+                if id == floatID {
+                    // The centre trails a thumb that slides past the pad's edge, so turning back is instant.
+                    let dx = p.x - pad.midX, dy = p.y - pad.midY
+                    let d = hypot(dx, dy), r = pad.width * 0.45
+                    if d > r {
+                        pad = pad.offsetBy(dx: dx * (d - r) / d, dy: dy * (d - r) / d)
+                        bindings[id] = .dpad(pad)
+                        showFloat(pad)
+                    }
+                }
+                touchKeys[id] = direction(at: p, in: pad)
             case .fastForward: break
             default: touchKeys[id] = button(at: p)
             }
@@ -266,6 +297,10 @@ final class ControllerView: UIView {
                 ffHeld = false
                 if Date().timeIntervalSince(began) < 0.3 { ffLatched.toggle() } // a tap toggles; a hold was momentary
             }
+            if ObjectIdentifier(t) == floatID {
+                floatID = nil
+                setNeedsLayout() // back to its resting place
+            }
             touchKeys[ObjectIdentifier(t)] = nil
             bindings[ObjectIdentifier(t)] = nil
         }
@@ -275,6 +310,10 @@ final class ControllerView: UIView {
     func releaseAll() {
         touchKeys = [:]
         bindings = [:]
+        if floatID != nil {
+            floatID = nil
+            setNeedsLayout()
+        }
         ffHeld = false
         ffLatched = false
         publish()
@@ -285,6 +324,27 @@ final class ControllerView: UIView {
             guard case .fastForward = element.kind else { return false }
             return frame(of: element).insetBy(dx: -10, dy: -10).contains(p)
         }
+    }
+
+    /// The D-pad's resting frame, if this pad has one.
+    private func dpadRest() -> CGRect? {
+        for element in elements {
+            if case .dpad = element.kind { return frame(of: element) }
+        }
+        return nil
+    }
+
+    /// The floating D-pad's area: the pad's whole side up to just past the resting D-pad, minus the buttons.
+    private func inFloatZone(_ p: CGPoint, rest: CGRect) -> Bool {
+        guard bounds.contains(p), button(at: p, slack: 0).isEmpty else { return false }
+        return rest.midX <= bounds.midX ? p.x <= rest.maxX + 20 : p.x >= rest.minX - 20
+    }
+
+    private func showFloat(_ pad: CGRect) {
+        guard let i = elements.firstIndex(where: { if case .dpad = $0.kind { return true } else { return false } })
+        else { return }
+        views[i].center = CGPoint(x: pad.midX, y: pad.midY)
+        views[i].alpha = 1
     }
 
     /// The D-pad catches a touch anywhere in a generous zone around it (40 pt beyond its drawn edge), unless the point

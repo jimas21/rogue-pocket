@@ -12,6 +12,7 @@ struct EmulatorScreen: View {
     @AppStorage("showDebug") private var showDebug = false
     @AppStorage("ffSpeed") private var ffSpeed = 3
     @AppStorage("colorCorrection") private var colorCorrection = true
+    @AppStorage("floatingDpad") private var floatingDpad = true
     @State private var sheet: Sheet?
     @State private var showDex = false
     /// What the foe has shown this battle, for the strip (portrait only).
@@ -93,7 +94,7 @@ struct EmulatorScreen: View {
                 gameMenu
             }
             .padding(.horizontal, 10)
-            ControllerPad(elements: PadLayout.portrait, layoutID: "portrait", emulator: emu)
+            ControllerPad(elements: PadLayout.portrait, layoutID: "portrait", emulator: emu, floating: floatingDpad)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(.bottom, 6)
@@ -111,7 +112,8 @@ struct EmulatorScreen: View {
         let leftAvoid = island.onLeft ? island.rect.offsetBy(dx: -margin, dy: 0) : .null
         let rightAvoid = island.onLeft ? .null : island.rect.offsetBy(dx: pad + margin - island.rect.width, dy: 0)
         return HStack(spacing: 0) {
-            ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu, avoid: leftAvoid)
+            ControllerPad(elements: PadLayout.landscapeLeft, layoutID: "left", emulator: emu, avoid: leftAvoid,
+                          floating: floatingDpad)
                 .frame(width: pad)
                 .overlay(alignment: .top) {
                     // Low in the column, under Select (see PadLayout.landscapeLeft).
@@ -213,6 +215,7 @@ struct EmulatorScreen: View {
             }
             Toggle(isOn: $emu.muted) { Label("Mute", systemImage: "speaker.slash") }
             Toggle(isOn: $colorCorrection) { Label("GBA screen colours", systemImage: "paintpalette") }
+            Toggle(isOn: $floatingDpad) { Label("Floating D-pad", systemImage: "dpad") }
             Picker(selection: $ffSpeed) {
                 Text("2x").tag(2)
                 Text("3x").tag(3)
