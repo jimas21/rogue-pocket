@@ -49,7 +49,7 @@ struct EmulatorScreen: View {
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .ignoresSafeArea(edges: .bottom) // the controls may use the home-indicator strip; that swipe is deferred
-        .background(Color.black.ignoresSafeArea())
+        .background(Color(red: 15 / 255, green: 23 / 255, blue: 20 / 255).ignoresSafeArea())
         .sheet(item: $sync.choice) { choice in
             SaveChoiceView(choice: choice, sync: sync)
         }
@@ -118,7 +118,7 @@ struct EmulatorScreen: View {
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(red: 0.12, green: 0.15, blue: 0.2).opacity(0.94),
+                            .background(Color(red: 22 / 255, green: 33 / 255, blue: 29 / 255).opacity(0.94),
                                         in: RoundedRectangle(cornerRadius: 12))
                             .padding(8)
                             .onTapGesture { showMemory = false }
@@ -277,7 +277,7 @@ private struct DexStrip: View {
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, minHeight: 64, maxHeight: 64, alignment: .leading)
-        .background(Color(red: 0.12, green: 0.15, blue: 0.2), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(red: 22 / 255, green: 33 / 255, blue: 29 / 255), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

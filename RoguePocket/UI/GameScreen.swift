@@ -21,7 +21,7 @@ final class GameScreenView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .black
+        backgroundColor = UIColor(red: 15 / 255, green: 23 / 255, blue: 20 / 255, alpha: 1)
         isOpaque = true
         layer.magnificationFilter = .nearest
         layer.minificationFilter = .nearest

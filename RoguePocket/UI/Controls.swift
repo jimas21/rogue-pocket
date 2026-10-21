@@ -99,8 +99,6 @@ final class ControllerView: UIView {
     private var pressed: GBAKeys = []
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
-    private static let idle = UIColor.white.withAlphaComponent(0.22)
-    private static let lit = UIColor.systemGreen.withAlphaComponent(0.85)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -124,31 +122,16 @@ final class ControllerView: UIView {
             let v: UIView
             switch element.kind {
             case .button(_, let label, let round):
-                let b = UILabel()
-                b.text = label
-                b.textAlignment = .center
-                b.textColor = .white
-                b.font = .systemFont(ofSize: label.count > 1 ? 15 : 20, weight: .bold)
-                b.backgroundColor = Self.idle
-                b.layer.cornerRadius = round ? element.size.height / 2 : 12
-                b.layer.masksToBounds = true
-                v = b
+                let face = label.count == 1 && round   // A and B: green letters, a stronger rim
+                v = GlassKey(text: label, font: .systemFont(ofSize: label.count > 1 ? 14 : 22, weight: .bold),
+                             radius: round ? element.size.height / 2 : 12, face: face)
             case .fastForward:
-                let b = UILabel()
-                b.text = "\u{25B6}\u{25B6}"
-                b.textAlignment = .center
-                b.textColor = .white
-                b.font = .systemFont(ofSize: 12, weight: .heavy)
-                b.backgroundColor = Self.idle
-                b.layer.cornerRadius = element.size.height / 2
-                b.layer.masksToBounds = true
-                v = b
+                v = GlassKey(text: "\u{25B6}\u{25B6}", font: .systemFont(ofSize: 12, weight: .heavy),
+                             radius: element.size.height / 2, face: false)
             case .dpad:
                 let pad = UIView()
                 for key in [GBAKeys.up, .down, .left, .right] {
-                    let arm = UIView()
-                    arm.backgroundColor = Self.idle
-                    arm.layer.cornerRadius = 10
+                    let arm = GlassKey(text: nil, font: .systemFont(ofSize: 1), radius: 10, face: false)
                     pad.addSubview(arm)
                     dpadArms.append((key, arm))
                 }
@@ -324,7 +307,7 @@ final class ControllerView: UIView {
         if ff != ffShown {
             ffShown = ff
             for (element, v) in zip(elements, views) {
-                if case .fastForward = element.kind { v.backgroundColor = ff ? Self.lit : Self.idle }
+                if case .fastForward = element.kind { (v as? GlassKey)?.pressed = ff }
             }
             if ff { haptic.impactOccurred() }
             onFastForward?(ff)
@@ -335,10 +318,82 @@ final class ControllerView: UIView {
         pressed = now
         for (element, v) in zip(elements, views) {
             if case .button(let k, _, _) = element.kind {
-                v.backgroundColor = now.contains(k) ? Self.lit : Self.idle
+                (v as? GlassKey)?.pressed = now.contains(k)
             }
         }
-        for (k, arm) in dpadArms { arm.backgroundColor = now.contains(k) ? Self.lit : Self.idle }
+        for (k, arm) in dpadArms { (arm as? GlassKey)?.pressed = now.contains(k) }
         onKeys?(now)
+    }
+}
+
+/// One control in the Emerald look: dark glass with an emerald rim and a faint top highlight. Pressed, it brightens,
+/// sinks slightly and glows. Never pure black: the game's darkest UI is a deep green-charcoal.
+final class GlassKey: UIView {
+    var pressed = false {
+        didSet { if pressed != oldValue { apply() } }
+    }
+
+    private let label = UILabel()
+    private let fill = CAGradientLayer()
+    private let sheen = CALayer()
+    private let radius: CGFloat
+    private let face: Bool
+
+    private static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> UIColor {
+        UIColor(red: r / 255, green: g / 255, blue: b / 255, alpha: a)
+    }
+
+    init(text: String?, font: UIFont, radius: CGFloat, face: Bool) {
+        self.radius = radius
+        self.face = face
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        fill.cornerRadius = radius
+        fill.masksToBounds = true
+        fill.borderWidth = face ? 2 : 1.5
+        layer.addSublayer(fill)
+        sheen.backgroundColor = UIColor.white.withAlphaComponent(0.14).cgColor
+        layer.addSublayer(sheen)
+        layer.cornerRadius = radius
+        layer.shadowOpacity = 1
+        if let text {
+            label.text = text
+            label.font = font
+            label.textAlignment = .center
+            addSubview(label)
+        }
+        apply()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fill.frame = bounds
+        let inset = min(radius, bounds.width / 2)
+        sheen.frame = CGRect(x: inset * 0.6, y: 1.5, width: max(0, bounds.width - inset * 1.2), height: 1)
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: radius).cgPath
+        CATransaction.commit()
+        label.frame = bounds
+    }
+
+    private func apply() {
+        let on = pressed
+        fill.colors = on
+            ? [Self.rgb(40, 70, 58, 0.96).cgColor, Self.rgb(20, 40, 32, 0.96).cgColor]
+            : [Self.rgb(30, 44, 40, 0.93).cgColor, Self.rgb(14, 22, 19, 0.93).cgColor]
+        fill.borderColor = on ? Self.rgb(110, 240, 175, 0.9).cgColor
+                              : Self.rgb(64, 214, 140, face ? 0.6 : 0.5).cgColor
+        label.textColor = on ? Self.rgb(220, 255, 236) : (face ? Self.rgb(110, 227, 166) : Self.rgb(191, 245, 215))
+        layer.shadowColor = on ? Self.rgb(60, 200, 140, 0.5).cgColor : UIColor.black.withAlphaComponent(0.5).cgColor
+        layer.shadowRadius = on ? 9 : 5
+        layer.shadowOffset = on ? .zero : CGSize(width: 0, height: 3)
+        UIView.animate(withDuration: on ? 0.05 : 0.12, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.transform = on ? CGAffineTransform(scaleX: 0.94, y: 0.94) : .identity
+        }
     }
 }
