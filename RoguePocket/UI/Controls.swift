@@ -122,6 +122,11 @@ final class ControllerView: UIView {
     private var area: CGRect { bounds.inset(by: layoutInsets) }
     /// The finger driving the floating D-pad, if any.
     private var floatID: ObjectIdentifier?
+    /// Floating D-pad: the thumb never sits more than this far from the pad's centre (the centre trails it), so
+    /// turning back is a short slide, not a trip back across the whole pad.
+    private static let floatReach: CGFloat = 24
+    /// Floating D-pad: the thumb presses a direction once it is this far from the centre.
+    private static let floatDeadZone: CGFloat = 6
 
     private var elements: [PadElement] = []
     private var layoutID = ""
@@ -254,11 +259,16 @@ final class ControllerView: UIView {
                 ffHeld = true
                 touchKeys[id] = []
             } else if floating, floatID == nil, let rest = dpadRest(), inFloatZone(p, rest: rest) {
-                let pad = CGRect(x: p.x - rest.width / 2, y: p.y - rest.height / 2, width: rest.width, height: rest.height)
+                // A thumb that lands on an arm of the resting pad presses that arm at once; anywhere else, the pad
+                // centres under the thumb.
+                let onArm = rest.contains(p) && hypot(p.x - rest.midX, p.y - rest.midY) >= Self.floatDeadZone
+                var pad = onArm ? rest
+                    : CGRect(x: p.x - rest.width / 2, y: p.y - rest.height / 2, width: rest.width, height: rest.height)
+                pad = trail(pad, to: p)
                 bindings[id] = .dpad(pad)
                 floatID = id
                 showFloat(pad)
-                touchKeys[id] = []
+                touchKeys[id] = direction(at: p, in: pad, dead: Self.floatDeadZone)
             } else if let pad = dpadFrame(near: p) {
                 bindings[id] = .dpad(pad)
                 touchKeys[id] = direction(at: p, in: pad)
@@ -277,16 +287,16 @@ final class ControllerView: UIView {
             switch bindings[id] {
             case .dpad(var pad):
                 if id == floatID {
-                    // The centre trails a thumb that slides past the pad's edge, so turning back is instant.
-                    let dx = p.x - pad.midX, dy = p.y - pad.midY
-                    let d = hypot(dx, dy), r = pad.width * 0.45
-                    if d > r {
-                        pad = pad.offsetBy(dx: dx * (d - r) / d, dy: dy * (d - r) / d)
+                    let moved = trail(pad, to: p)
+                    if moved != pad {
+                        pad = moved
                         bindings[id] = .dpad(pad)
                         showFloat(pad)
                     }
+                    touchKeys[id] = direction(at: p, in: pad, dead: Self.floatDeadZone)
+                } else {
+                    touchKeys[id] = direction(at: p, in: pad)
                 }
-                touchKeys[id] = direction(at: p, in: pad)
             case .fastForward: break
             default: touchKeys[id] = button(at: p)
             }
@@ -376,12 +386,20 @@ final class ControllerView: UIView {
         return nil
     }
 
+    /// The floating pad moved along so the thumb is at most floatReach from its centre.
+    private func trail(_ pad: CGRect, to p: CGPoint) -> CGRect {
+        let dx = p.x - pad.midX, dy = p.y - pad.midY
+        let d = hypot(dx, dy), r = Self.floatReach
+        guard d > r else { return pad }
+        return pad.offsetBy(dx: dx * (d - r) / d, dy: dy * (d - r) / d)
+    }
+
     /// Direction from the D-pad's centre. Eight ways, but the diagonals are narrow (30 degrees each) so a thumb
     /// aimed at a cardinal direction stays cardinal; a small dead zone in the middle presses nothing.
-    private func direction(at p: CGPoint, in pad: CGRect) -> GBAKeys {
+    private func direction(at p: CGPoint, in pad: CGRect, dead: CGFloat? = nil) -> GBAKeys {
         let dx = p.x - pad.midX
         let dy = p.y - pad.midY
-        if hypot(dx, dy) < pad.width * 0.09 { return [] }
+        if hypot(dx, dy) < (dead ?? pad.width * 0.09) { return [] }
         var angle = atan2(-dy, dx) * 180 / .pi // 0 = right, 90 = up
         if angle < 0 { angle += 360 }
         switch angle {
