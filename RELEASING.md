@@ -16,7 +16,8 @@ A push to main is read as Conventional Commits.
 - If it holds a `feat`, `fix` or `perf` commit (or a breaking change), the Release workflow makes a new
   version straight away. It opens the release pull request, merges it, tags `vX.Y.Z`, writes the GitHub
   release and the CHANGELOG entry, and starts the TestFlight workflow on that tag.
-- TestFlight builds it as `X.Y.Z (N)` and, when the upload passes, tags the commit `build/X.Y.Z-N` itself.
+- TestFlight builds it as `X.Y.Z (N)`. The `vX.Y.Z` release tag is the only tag a build gets. The older
+  `build/X.Y.Z-N` tags (builds up to 44) stay as history; no new ones are made.
 - A push with only `ci`, `docs`, `chore`, `refactor`, `test`, `build` or `style` commits makes no release
   and no build.
 - Several commits in one push make one release.
@@ -43,8 +44,9 @@ Before, five builds with different changes all read 0.2.0. Now each shipped chan
 
 ## Building again without a change
 
-In Actions, pick TestFlight, then Run workflow, and choose the latest `vX.Y.Z` tag (or run
-`gh workflow run testflight.yml --ref vX.Y.Z`). It builds the same version with the next build number.
+Only when an upload failed. In Actions, pick TestFlight, then Run workflow, and choose the latest `vX.Y.Z`
+tag (or run `gh workflow run testflight.yml --ref vX.Y.Z`). It repeats that version with the next build number,
+so any real change ships as the next release instead.
 
 ## If a run fails
 
