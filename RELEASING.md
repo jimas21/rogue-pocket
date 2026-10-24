@@ -1,31 +1,60 @@
 # Releasing
 
-Every build that reaches TestFlight has its own number, made of a version and a build: `0.2.0 (43)`.
+Every build that reaches TestFlight is named `X.Y.Z (N)`, for example `0.2.1 (45)`.
 
-- **Version**: `MARKETING_VERSION` in `project.yml`, three numbers, MAJOR.MINOR.PATCH. Only release-please
-  changes it. Never edit it by hand.
-- **Build**: `CURRENT_PROJECT_VERSION`, set by CI to the GitHub Actions run number on every upload. It only
+- **Version** `X.Y.Z`: `MARKETING_VERSION` in `project.yml`, three numbers, MAJOR.MINOR.PATCH. Only
+  release-please changes it.
+- **Build** `N`: the run number of the TestFlight workflow (`CURRENT_PROJECT_VERSION`, set by CI). It only
   goes up and is never reused.
 
-Apple allows at most three numbers in a version, so the build is the fourth place: `0.2.0 (43)` is build 43
-of 0.2.0. No two uploads ever share a number.
+The build number is shown beside the version and is never part of it.
 
-## Every push to main
+## Every change that ships is its own release
 
-1. Write the commit as a Conventional Commit (`feat:`, `fix:`, `chore:` ...). release-please reads these.
-2. Before pushing, know the number the build will get: the version in `project.yml`, plus the next run
-   number of the TestFlight workflow.
-3. Push. The TestFlight workflow uploads that version and build. Commits that only touch Markdown or the
-   release-please files do not build.
-4. When the TestFlight run passes, tag the commit `build/<version>-<build>` (for example `build/0.2.0-43`)
-   and push the tag. Every build that shipped has a tag.
+A push to main is read as Conventional Commits.
 
-## Releasing a version
+- If it holds a `feat`, `fix` or `perf` commit (or a breaking change), the Release workflow makes a new
+  version straight away. It opens the release pull request, merges it, tags `vX.Y.Z`, writes the GitHub
+  release and the CHANGELOG entry, and starts the TestFlight workflow on that tag.
+- TestFlight builds it as `X.Y.Z (N)` and, when the upload passes, tags the commit `build/X.Y.Z-N` itself.
+- A push with only `ci`, `docs`, `chore`, `refactor`, `test`, `build` or `style` commits makes no release
+  and no build.
+- Several commits in one push make one release.
 
-1. Merge the open `chore(main): release X.Y.Z` pull request that release-please keeps up to date. That
-   creates the `vX.Y.Z` tag, the GitHub release and the CHANGELOG entry, and sets `project.yml` to X.Y.Z.
-2. Builds after that are X.Y.Z with a higher build number, until the next release.
-3. release-please picks the next version from the commits since the last release: below 1.0, `feat` raises
-   the middle number and `fix` the last one.
+## The next number
 
-Never create a `v*` tag by hand, and never set the version by hand.
+- Below 1.0, `fix` or `perf` raises the last number (0.2.0 to 0.2.1).
+- `feat` or a breaking change (`feat!:`) raises the middle number and resets the last (0.2.1 to 0.3.0).
+- A push with both takes the bigger step.
+- The build is the TestFlight workflow's latest run number plus one.
+- Before pushing, work out both, for example "this push makes 0.2.1 (45)".
+
+## Before and after
+
+| Before | Now |
+| --- | --- |
+| 0.2.0 (39) | 0.2.0 (44), everything up to the doubles release |
+| 0.2.0 (40) | 0.2.1 (45), the next fix |
+| 0.2.0 (41) | 0.3.0 (46), the next feature |
+| 0.2.0 (42) | |
+| 0.2.0 (43) | |
+
+Before, five builds with different changes all read 0.2.0. Now each shipped change gets its own version.
+
+## Building again without a change
+
+In Actions, pick TestFlight, then Run workflow, and choose the latest `vX.Y.Z` tag (or run
+`gh workflow run testflight.yml --ref vX.Y.Z`). It builds the same version with the next build number.
+
+## If a run fails
+
+- Release run: re-run it from the Actions tab. It tags a merged release pull request first, then starts the
+  build.
+- TestFlight run that hit an Apple network blip: re-run the failed job.
+- A real defect ships as the next fix release.
+
+## Never
+
+- Edit `MARKETING_VERSION` by hand.
+- Create `v*` tags, `build/*` tags or GitHub releases by hand.
+- Put the build number into the version.

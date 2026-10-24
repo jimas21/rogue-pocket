@@ -1,16 +1,9 @@
 name: TestFlight
 
-# Builds on a cloud Mac and uploads to TestFlight. Triggers are push to main and manual only:
-# pull requests (including forks) never run this, because it holds signing secrets.
+# Builds on a cloud Mac and uploads to TestFlight. The Release workflow starts it on each new vX.Y.Z tag;
+# it can also be started by hand from the Actions tab. Pull requests (including forks) never run this,
+# because it holds signing secrets.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "version.txt"
-      - "release-please-config.json"
-      - ".release-please-manifest.json"
-      - ".github/workflows/release-please.yml"
   workflow_dispatch:
 
 permissions:
@@ -29,6 +22,8 @@ jobs:
     if: ${{ vars.TEAM_ID != '' && vars.BUNDLE_ID != '' }}
     runs-on: macos-26   # Xcode 26.x default, iOS 26 SDK (Apple requires it for uploads). Plain runner: free on public repos.
     timeout-minutes: 45
+    permissions:
+      contents: write   # only to push the build tag
     env:
       # Not secret: repo VARIABLES (Settings > Secrets and variables > Actions > Variables).
       BUNDLE_ID: ${{ vars.BUNDLE_ID }}
@@ -38,6 +33,8 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Preflight (settings present and well-formed)
         env:
@@ -95,3 +92,19 @@ jobs:
       - name: Remove API key file
         if: always()
         run: bash ci/cleanup.sh
+
+      - name: Tag the build
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -m1 'MARKETING_VERSION' project.yml | sed 's/.*: *//; s/"//g; s/ *#.*//')
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Unexpected version in project.yml: $version"
+            exit 1
+          fi
+          tag="build/${version}-${GITHUB_RUN_NUMBER}"
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            tag -a "$tag" -m "TestFlight ${version} (${GITHUB_RUN_NUMBER})"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${tag}"
+          echo "- Tag: \`${tag}\`" >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,10 @@
-# Keeps a "Release x.y.z" pull request up to date from the conventional commits on main
-# (feat: minor, fix: patch while below 1.0). Merging it bumps MARKETING_VERSION, updates
-# CHANGELOG.md, and creates the vX.Y.Z tag and GitHub release.
+# Every change that ships gets its own release. A push to main that holds a feat, fix or perf commit
+# gets a release pull request from release-please. This job merges that pull request at once, then
+# release-please tags vX.Y.Z and writes the GitHub release and the CHANGELOG entry, and this job starts
+# the TestFlight build on that tag. Pushes with only ci, docs, chore, refactor, test, build or style
+# commits release nothing.
+# release-please runs twice because a merge made with the workflow token starts no new run, so the
+# second run does the tagging inside this one.
 name: Release
 
 on:
@@ -10,12 +14,92 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
+  actions: write
+
+# One release at a time; a later push waits instead of cancelling a release in progress.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+      - name: Open or update the release pull request
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Only release-please's own pull request is merged: same repository (never a fork), made by the
+      # workflow bot, and carrying the label release-please puts on its pull requests. The lookup goes
+      # through the API instead of the step output above, because release-please reports nothing when
+      # an open release pull request needs no change.
+      - name: Merge the release pull request
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          number=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=main&head=${GITHUB_REPOSITORY_OWNER}:release-please--branches--main" \
+            --jq '[.[] | select(.user.login == "github-actions[bot]") | select(any(.labels[]; .name == "autorelease: pending"))][0].number // empty')
+          if [ -z "$number" ]; then
+            echo "No release pull request, nothing to release."
+            exit 0
+          fi
+          state=""
+          for attempt in 1 2 3; do
+            if gh pr merge "$number" -R "$GITHUB_REPOSITORY" --squash --delete-branch; then
+              break
+            fi
+            state=$(gh pr view "$number" -R "$GITHUB_REPOSITORY" --json state --jq .state)
+            if [ "$state" = "MERGED" ]; then
+              break
+            fi
+            sleep 15
+          done
+          state=$(gh pr view "$number" -R "$GITHUB_REPOSITORY" --json state --jq .state)
+          if [ "$state" != "MERGED" ]; then
+            echo "::error::Release pull request #$number could not be merged (state: $state)."
+            exit 1
+          fi
+          for wait in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            oid=$(gh pr view "$number" -R "$GITHUB_REPOSITORY" --json mergeCommit --jq '.mergeCommit.oid // empty')
+            if [ -n "$oid" ]; then
+              break
+            fi
+            sleep 5
+          done
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Tag the release and write the release page
+        id: tag
+        if: steps.merge.outputs.number != ''
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
+
+      - name: Stop if the merge made no release
+        if: steps.merge.outputs.number != '' && steps.tag.outputs.release_created != 'true'
+        env:
+          NUMBER: ${{ steps.merge.outputs.number }}
+        run: |
+          echo "::error::Merged release pull request #$NUMBER but no release was made. Re-run this workflow: it tags a merged release pull request first."
+          exit 1
+
+      - name: Start the TestFlight build
+        if: steps.release.outputs.release_created == 'true' || steps.tag.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag_name || steps.release.outputs.tag_name }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Unexpected release tag: $TAG"
+            exit 1
+          fi
+          gh workflow run testflight.yml -R "$GITHUB_REPOSITORY" --ref "$TAG"
+          echo "Released $TAG. TestFlight build started." >> "$GITHUB_STEP_SUMMARY"
