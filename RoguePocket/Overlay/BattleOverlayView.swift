@@ -5,9 +5,16 @@ import SwiftUI
 struct BattleOverlayView: View {
     @ObservedObject var overlay: BattleOverlay
 
-    /// Where each move's name starts in the move menu, and the free row under it.
-    private static let moveSlots = [CGPoint(x: 16, y: 134), CGPoint(x: 88, y: 134),
-                                    CGPoint(x: 16, y: 151), CGPoint(x: 88, y: 151)]
+    /// Where each move's name starts in the move menu and the blank 4 px band under it (the letters' tails end the
+    /// row above the band).
+    private static let moveSlots = [CGPoint(x: 16, y: 136), CGPoint(x: 88, y: 136),
+                                    CGPoint(x: 16, y: 152), CGPoint(x: 88, y: 152)]
+    /// The mark under a move's name: a two-bar pip (3 x 2 px bars) says which foe a number is for when two are up.
+    private static let markPipWidth: CGFloat = 3
+    private static let markPipBar: CGFloat = 2
+    private static let markPipAdvance: CGFloat = 4
+    private static let markGap: CGFloat = 4
+    private static let markPale = Color(red: 196 / 255, green: 196 / 255, blue: 204 / 255)
     /// The switch screen: the first member's big card (its free spot is just above the card), then the free gap in
     /// the second row of each of the five slots on the right.
     private static let partySlots = [CGPoint(x: 60, y: 17)] + (0..<5).map { CGPoint(x: 165, y: 26 + 24 * CGFloat($0)) }
@@ -21,9 +28,9 @@ struct BattleOverlayView: View {
                 drawSwitchScreen(state, ctx: ctx, s: s)
                 return
             }
-            if state.doubles {
-                drawDoublesWeaknesses(state.foes, ctx: ctx, s: s)
-            } else if let foe = state.foes.first, let box = foe.box {
+            // A double battle draws nothing on the picture but the move marks: both foes' lists are in the strip under
+            // the picture and in the band above it.
+            if !state.doubles, let foe = state.foes.first, let box = foe.box {
                 // Singles: its own types inside its HP box, left of "HP" (mirroring your box); what it is weak to on
                 // the empty background above the box, ending before its sprite (x 144). One icon size everywhere: 8.
                 drawTypes(foe.types, x: box.x + 8, y: box.y + 15, icon: 8, divider: false, ctx: ctx, s: s)
@@ -38,28 +45,6 @@ struct BattleOverlayView: View {
             }
         }
         .allowsHitTesting(false)
-    }
-
-    /// Doubles: the two HP boxes stack at the top left and the foes stand to the right (the nearer one's sprite
-    /// starts at x 120). Each foe's weaknesses fill the background between, beside its own box, two to a row.
-    private func drawDoublesWeaknesses(_ foes: [BattleOverlayState.Foe], ctx: GraphicsContext, s: CGFloat) {
-        let placed = foes.compactMap { f in f.box.map { (foe: f, box: $0) } }.sorted { $0.box.y < $1.box.y }
-        guard let right = placed.map({ $0.box.x + 64 }).max() else { return }
-        let x0 = right + 2
-        var top: CGFloat = 0
-        for (i, p) in placed.enumerated() {
-            let y0 = max(p.box.y + 1, top)
-            let yEnd = i + 1 < placed.count ? p.box.y + 32 : 56   // the lower box's rows stop above your Pokemon
-            var x = drawTypes(p.foe.types, x: x0, y: y0, icon: 8, ctx: ctx, s: s), y = y0
-            for w in p.foe.weaknesses {
-                let width = 8 + 1 + MicroFont.width(label(w.multiplier))
-                if x + width > 119 { x = x0; y += 9 }
-                if y + 8 > yEnd { break }
-                drawWeakness(w, x: x, y: y, icon: 8, ctx: ctx, s: s)
-                x += width + 2
-            }
-            top = p.box.y + 33
-        }
     }
 
     /// The switch screen: the foes' weaknesses on the empty background top left (in doubles a small picture says
@@ -144,19 +129,24 @@ struct BattleOverlayView: View {
         MicroFont.draw(label(hint.multiplier), x: p.x + 9, y: p.y + 1, color: color, ctx: ctx, s: s)
     }
 
-    /// Under a move's name: a short line in the effectiveness colour, then the multiplier. In doubles, one multiplier
-    /// per foe, upper HP box first ("x2/x0.5"); the line takes the better one's colour.
+    /// Under a move's name: its multiplier against each foe on the field, upper HP box first, in the effectiveness
+    /// colour. With two foes a small two-bar mark before each number says which foe it is for: the top bar for the
+    /// upper foe, the bottom bar for the lower, the other bar pale.
     private func drawTag(_ ms: [Double], at p: CGPoint, ctx: GraphicsContext, s: CGFloat) {
-        guard let best = ms.max() else { return }
-        ctx.fill(Path(CGRect(x: p.x * s, y: (p.y + 1) * s, width: 10 * s, height: 3 * s)), with: .color(Self.color(best)))
-        var x = p.x + 12
+        var x = p.x
         for (i, m) in ms.enumerated() {
-            if i > 0 {
-                MicroFont.draw("/", x: x, y: p.y, color: Self.color(1), ctx: ctx, s: s)
-                x += MicroFont.width("/") + 1
+            if ms.count == 2 {
+                let own = Self.color(m)
+                let top = i == 0 ? own : Self.markPale
+                let bottom = i == 0 ? Self.markPale : own
+                ctx.fill(Path(CGRect(x: x * s, y: p.y * s, width: Self.markPipWidth * s, height: Self.markPipBar * s)),
+                         with: .color(top))
+                ctx.fill(Path(CGRect(x: x * s, y: (p.y + Self.markPipBar) * s, width: Self.markPipWidth * s,
+                                     height: Self.markPipBar * s)), with: .color(bottom))
+                x += Self.markPipAdvance
             }
-            MicroFont.draw(label(m), x: x, y: p.y, color: Self.color(m), ctx: ctx, s: s)
-            x += MicroFont.width(label(m)) + 1
+            MicroFont.drawShort(label(m), x: x, y: p.y, color: Self.color(m), ctx: ctx, s: s)
+            x += MicroFont.width(label(m)) + Self.markGap
         }
     }
 
@@ -186,6 +176,14 @@ enum MicroFont {
         "/": ["001", "001", "010", "100", "100"],
     ]
 
+    /// The characters of a move mark, cut to four rows for the 4 px band under a move name (a five-row glyph does not
+    /// fit there).
+    private static let shortGlyphs: [Character: [String]] = [
+        "0": ["111", "101", "101", "111"], "1": ["010", "110", "010", "111"], "2": ["111", "011", "110", "111"],
+        "4": ["101", "111", "001", "001"], "5": ["111", "110", "011", "111"], ".": ["0", "0", "0", "1"],
+        "x": ["000", "101", "010", "101"],
+    ]
+
     /// "4", "2", "1", "0.5", "0.25", "0".
     static func number(_ m: Double) -> String {
         if m == m.rounded() { return String(Int(m)) }
@@ -203,6 +201,23 @@ enum MicroFont {
         var cx = x
         for ch in text {
             guard let rows = glyphs[ch] else { cx += 4; continue }
+            for (j, row) in rows.enumerated() {
+                for (i, bit) in row.enumerated() where bit == "1" {
+                    path.addRect(CGRect(x: (cx + CGFloat(i)) * s, y: (y + CGFloat(j)) * s, width: s, height: s))
+                }
+            }
+            cx += CGFloat(rows[0].count + 1)
+        }
+        ctx.fill(path, with: .color(color))
+    }
+
+    /// `draw` with the four-row cut, for the 4 px band under a move name. Each glyph is as wide as the five-row one,
+    /// so `width` serves both.
+    static func drawShort(_ text: String, x: CGFloat, y: CGFloat, color: Color, ctx: GraphicsContext, s: CGFloat) {
+        var path = Path()
+        var cx = x
+        for ch in text {
+            guard let rows = shortGlyphs[ch] else { cx += 4; continue }
             for (j, row) in rows.enumerated() {
                 for (i, bit) in row.enumerated() where bit == "1" {
                     path.addRect(CGRect(x: (cx + CGFloat(i)) * s, y: (y + CGFloat(j)) * s, width: s, height: s))

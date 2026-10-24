@@ -42,6 +42,16 @@ struct BattleOverlayState: Equatable {
     /// The switch screen is up: the weaknesses go top left, and members get a hint when that hit is not neutral.
     var partyMenu = false
     var partyHints: [PartyHint] = []
+    /// The battler under the cursor while a target is being picked; nil otherwise.
+    var aimed: Int?
+}
+
+/// What the strip under the picture and the landscape band show in a double battle: the foes the reader last saw
+/// (upper HP box first) without their box positions, because nothing there follows a box and a sliding box must not
+/// redraw them.
+struct FoeBoard: Equatable {
+    var foes: [BattleOverlayState.Foe]
+    var aimed: Int?
 }
 
 /// The game's own type chart and move table, from the Dex the phone keeps (data.js is `window.DEX = {...}`).
@@ -55,7 +65,10 @@ final class TypeData {
     private let abilityName: [String]
     /// Species id -> its ability ids [slot 0, slot 1, hidden].
     private let speciesAbilities: [Int: [Int]]
+    /// Species id -> the name the Dex gives it.
+    private let speciesNames: [Int: String]
 
+    func speciesName(_ id: Int) -> String? { speciesNames[id] }
     func moveName(_ id: Int) -> String? { id > 0 && id < moveName.count ? moveName[id] : nil }
     func moveTypeOf(_ id: Int) -> Int? { id > 0 && id < moveType.count && moveType[id] >= 0 ? moveType[id] : nil }
     func abilityName(_ id: Int) -> String? { id > 0 && id < abilityName.count ? abilityName[id] : nil }
@@ -88,6 +101,11 @@ final class TypeData {
             if let id = sp["id"] as? Int, let ab = sp["ab"] as? [Int] { abilities[id] = ab }
         }
         speciesAbilities = abilities
+        var names: [Int: String] = [:]
+        for sp in obj["species"] as? [[String: Any]] ?? [] {
+            if let id = sp["id"] as? Int, let name = sp["name"] as? String { names[id] = name }
+        }
+        speciesNames = names
     }
 
     /// The name of a party member's ability: its slot's ability, or slot 0's when that slot is empty.
@@ -156,12 +174,15 @@ enum BattleReader {
     private static let playerParty: UInt32 = 0x0203_6C7C          // struct Pokemon[6]; gPlayerPartyCount 3 bytes before
     private static let controllerFuncs: UInt32 = 0x0300_2244     // gBattlerControllerFuncs[4]
     private static let handleInputChooseMove: Set<UInt32> = [0x0805_A6C5, 0x0805_BB19]
+    /// The target step: choosing which Pokemon a move hits. A build not listed here keeps both foes bright there.
+    private static let handleInputChooseTarget: Set<UInt32> = [0x0805_B3B1]
     private static let battlersCount: UInt32 = 0x0201_C33C
     private static let battlerPartyIndexes: UInt32 = 0x0201_C340 // u16[4]
     private static let battleMons: UInt32 = 0x0201_C358          // struct BattlePokemon[4], 96 bytes each
     private static let battleStructPtr: UInt32 = 0x0201_C83C     // ->illusion[4] at +660, 8 bytes each
     private static let enemyParty: UInt32 = 0x0203_6EEC          // struct Pokemon[6], 104 bytes, personality at +0
     private static let healthboxSpriteIds: UInt32 = 0x0300_22DC
+    private static let multiUsePlayerCursor: UInt32 = 0x0300_22E0 // u8, the battler under the target cursor
     private static let sprites: UInt32 = 0x0203_C690             // struct Sprite[64], 68 bytes each
 
     /// nil outside a battle. `previous` is kept while a foe's slot is mid-swap (see below).
@@ -254,14 +275,21 @@ enum BattleReader {
         }
 
         // The move menu (battler 0, or 2 for the second Pokemon in doubles): every damaging move gets its multiplier
-        // against each foe.
+        // against each foe. The menu stays up while a target is picked, so its marks stay too, and at that step the
+        // game's own target cursor says which battler is aimed at.
         if let funcs = core.readMemory(address: controllerFuncs, length: 16),
-           let me = (state.doubles ? [0, 2] : [0]).first(where: { handleInputChooseMove.contains(u32(funcs, 4 * $0)) }) {
+           let me = (state.doubles ? [0, 2] : [0]).first(where: {
+               handleInputChooseMove.contains(u32(funcs, 4 * $0)) || handleInputChooseTarget.contains(u32(funcs, 4 * $0))
+           }) {
             let mine = Array(mons[(96 * me)..<(96 * me + 96)])
             for i in 0..<4 {
                 let move = Int(u16(mine, 12 + 2 * i))
                 let ms = state.foes.compactMap { data.moveMultiplier(move, against: $0.types) }
                 if ms.count == state.foes.count { state.moveTags.append(.init(slot: i, multipliers: ms)) }
+            }
+            if handleInputChooseTarget.contains(u32(funcs, 4 * me)),
+               let cursor = core.readMemory(address: multiUsePlayerCursor, length: 1)?.first, cursor < 4 {
+                state.aimed = Int(cursor)
             }
         }
         return state
@@ -285,6 +313,12 @@ enum BattleReader {
             out += " box id \(ids[1]) flags \(String(u16(sprite, 62), radix: 16)) owner \(s16(sprite, 58))"
         }
         return out
+    }
+
+    /// True while the game is in a battle (any screen of it: the bag and the summary included); false when unreadable.
+    static func inBattle(_ core: MGBACore) -> Bool {
+        guard let byte = core.readMemory(address: gMain + 0x439, length: 1)?.first else { return false }
+        return byte & 2 != 0
     }
 
     /// Substruct order (growth, attacks, EVs, misc) by personality % 24.
@@ -325,6 +359,9 @@ enum BattleReader {
 final class BattleOverlay: ObservableObject {
     @Published private(set) var state: BattleOverlayState?
     @Published private(set) var typeIcons: [Int: UIImage] = [:]
+    /// Both foes of a double battle, kept for the whole fight: the reader returns nothing on the bag and summary
+    /// screens, and the strip must not blink out and back. Nil in singles and outside a battle.
+    @Published private(set) var board: FoeBoard?
     private(set) var data: TypeData?
     private var loading = false
     private var lastAttempt = Date.distantPast
@@ -358,6 +395,24 @@ final class BattleOverlay: ObservableObject {
         guard let data else { return loadIfNeeded() }
         let next = BattleReader.read(core, data: data, previous: state)
         if next != state { state = next }
+        let held = heldBoard(after: next, core: core)
+        if held != board { board = held }
+    }
+
+    /// The board for a read: built from a doubles read, kept across screens the reader skips while the battle is
+    /// still on, dropped when the battle ends or a singles battle is read.
+    private func heldBoard(after next: BattleOverlayState?, core: MGBACore) -> FoeBoard? {
+        if let next {
+            guard next.doubles else { return nil }
+            let foes = next.foes.map { foe -> BattleOverlayState.Foe in
+                var copy = foe
+                copy.box = nil
+                return copy
+            }
+            return FoeBoard(foes: foes, aimed: next.aimed)
+        }
+        if let board, BattleReader.inBattle(core) { return board }
+        return nil
     }
 
     /// The type data and icons come with the Dex download (the icons are game art, kept out of the app itself).

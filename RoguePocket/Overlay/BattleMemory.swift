@@ -30,6 +30,11 @@ final class BattleMemory: ObservableObject {
             if facts != nil { facts = nil }
             return
         }
+        // A double battle's strip lists both foes' weaknesses instead of what they have shown.
+        if battle["format"] as? String == "double" {
+            if facts != nil { facts = nil }
+            return
+        }
         var next = BattleFacts()
         next.used = foe["revealedMoves"] as? [Int] ?? []
         if let id = foe["revealedAbility"] as? Int, id > 0 { next.ability = data?.abilityName(id) }

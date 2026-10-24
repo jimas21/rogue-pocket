@@ -2,8 +2,9 @@ import SwiftUI
 
 /// The game, full screen (presented as a cover: no back-swipe for a thumb on the D-pad to trigger by accident).
 /// Portrait: picture across the full width, the Dex strip, then the controls. Landscape: a control column on each side
-/// inside the safe area and the biggest picture between them. Controls move off the Dynamic Island (it is a hole in
-/// the screen; touches there never register) and never sit over the picture.
+/// inside the safe area and the biggest picture between them; a double battle lists both foes' weaknesses in the band
+/// above the picture. Controls move off the Dynamic Island (it is a hole in the screen; touches there never register)
+/// and never sit over the picture.
 struct EmulatorScreen: View {
     @ObservedObject var emu: Emulator
     @ObservedObject var sync: SyncManager
@@ -111,6 +112,8 @@ struct EmulatorScreen: View {
         // The island rect in each pad's own coordinates.
         let leftAvoid = island.onLeft ? island.rect : .null // the left pad starts at the screen edge
         let rightAvoid = island.onLeft ? .null : island.rect.offsetBy(dx: pad + margin - island.rect.width, dy: 0)
+        // The empty band above the picture (the picture is centred): room for the foes' lists when it is tall enough.
+        let band = (size.height - pictureWidth / 1.5) / 2
         return ZStack(alignment: .leading) {
             HStack(spacing: 0) {
                 Color.clear.frame(width: side)
@@ -119,6 +122,11 @@ struct EmulatorScreen: View {
                 ControllerPad(elements: PadLayout.landscapeRight, layoutID: "right", emulator: emu, avoid: rightAvoid)
                     .frame(width: pad)
                     .padding(.trailing, margin)
+            }
+            if band >= FoeBoardMetrics.bandMinHeight {
+                TopFoeBand(overlay: emu.overlay, width: pictureWidth)
+                    .position(x: side + pictureWidth / 2, y: band / 2)
+                    .allowsHitTesting(false)
             }
             // The left pad spans the whole left side of the screen, over the left half of the picture: the controls
             // sit in its column, and the floating D-pad can start anywhere in it (and draws over the picture).
@@ -286,15 +294,18 @@ struct EmulatorScreen: View {
     }
 }
 
-/// The strip between the picture and the controls in portrait. In a battle it remembers what the foe has shown
-/// (BattleMemoryView); otherwise it is the Dex button. Its height never changes, so the controls never move.
+/// The strip between the picture and the controls in portrait. In a double battle it lists both foes' weaknesses
+/// (FoeBoardStrip); in singles it remembers what the foe has shown (BattleMemoryView); otherwise it is the Dex button.
+/// Its height never changes, so the controls never move.
 private struct DexStrip: View {
     @ObservedObject var memory: BattleMemory
     @ObservedObject var overlay: BattleOverlay
 
     var body: some View {
         Group {
-            if let facts = memory.facts {
+            if let board = overlay.board {
+                FoeBoardStrip(board: board, overlay: overlay)
+            } else if let facts = memory.facts {
                 BattleMemoryView(facts: facts, overlay: overlay)
             } else {
                 HStack {
@@ -308,6 +319,20 @@ private struct DexStrip: View {
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, minHeight: 64, maxHeight: 64, alignment: .leading)
         .background(Color(red: 22 / 255, green: 33 / 255, blue: 29 / 255), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+/// The foes' weaknesses above the picture in landscape. It observes the overlay itself because the screen observes
+/// only the emulator; in singles the board is nil and nothing is drawn.
+private struct TopFoeBand: View {
+    @ObservedObject var overlay: BattleOverlay
+    let width: CGFloat
+
+    var body: some View {
+        if let board = overlay.board {
+            FoeBoardBand(board: board, overlay: overlay)
+                .frame(width: width, height: FoeBoardMetrics.bandPanelHeight)
+        }
     }
 }
 
