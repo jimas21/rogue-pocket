@@ -1,9 +1,9 @@
 import Foundation
 import UIKit
 
-/// What the battle overlay draws, in GBA pixels. Facts the player could look up, nothing more: each foe's weaknesses
-/// beside its HP box, each damaging move's effectiveness under its name in the move menu, and on the switch screen how
-/// hard the foes' own types hit each party member. Singles and doubles.
+/// What the battle overlay draws, in GBA pixels. Facts the player could look up, nothing more: every Pokemon's types
+/// inside its HP box, the singles foe's weaknesses above its box, each damaging move's effectiveness under its name in
+/// the move menu, and on the switch screen how hard the foes' own types hit each party member. Singles and doubles.
 struct BattleOverlayState: Equatable {
     struct Weakness: Equatable {
         let type: Int
@@ -19,6 +19,14 @@ struct BattleOverlayState: Equatable {
         /// Top-left corner of its HP box (follows it as it slides in); nil while that box is not on screen.
         var box: CGPoint?
         let weaknesses: [Weakness]
+    }
+
+    /// One of your Pokemon in a double battle: battler 0, then battler 2.
+    struct Own: Equatable {
+        let battler: Int
+        let types: [Int]
+        /// Top-left corner of its HP box; nil while that box is not on screen.
+        var box: CGPoint?
     }
 
     struct MoveTag: Equatable {
@@ -37,6 +45,14 @@ struct BattleOverlayState: Equatable {
     /// Your Pokemon's types and the top-left of its HP box (singles; drawn in the box's empty corner).
     var playerTypes: [Int] = []
     var playerBox: CGPoint?
+    /// Your two Pokemon in a double battle (singles keeps `playerTypes` and `playerBox`).
+    var own: [Own] = []
+    /// Battlers whose HP box must stay bare right now: a status tag shows in the slot the types would take, or (in a
+    /// double battle) the box is still moving.
+    var typesOff: Set<Int> = []
+    /// Battlers whose HP box stood where it was on the previous read. A box shows its types only after two such reads
+    /// in a row, so a screen that is still fading in or a box still sliding never carries them.
+    var calm: Set<Int> = []
     /// Only while the move menu is open.
     var moveTags: [MoveTag] = []
     /// The switch screen is up: the weaknesses go top left, and members get a hint when that hit is not neutral.
@@ -184,6 +200,10 @@ enum BattleReader {
     private static let healthboxSpriteIds: UInt32 = 0x0300_22DC
     private static let multiUsePlayerCursor: UInt32 = 0x0300_22E0 // u8, the battler under the target cursor
     private static let sprites: UInt32 = 0x0203_C690             // struct Sprite[64], 68 bytes each
+    /// The status1 bits that make the game draw a status tag in the HP box (the toxic counter alone draws none).
+    private static let statusTag: UInt32 = 0x10FF
+    /// How far a box may move between two reads and still count as standing (it bounces while a move is picked).
+    private static let settleSlack: CGFloat = 2
 
     /// nil outside a battle. `previous` is kept while a foe's slot is mid-swap (see below).
     static func read(_ core: MGBACore, data: TypeData, previous: BattleOverlayState?) -> BattleOverlayState? {
@@ -239,9 +259,33 @@ enum BattleReader {
                 let m = data.multiplier(t, against: types)
                 return m > 1 ? .init(type: t, multiplier: m) : nil
             }.sorted { $0.multiplier != $1.multiplier ? $0.multiplier > $1.multiplier : $0.type < $1.type }
+            // The status tag takes the slot the types would; in a double battle a box that has not stood still for two
+            // reads has not landed, so its types wait.
+            let was = previous?.foes.first(where: { $0.battler == b })?.box
+            let standing = settled(box, was: was)
+            if standing { state.calm.insert(b) }
+            if u32(mon, 80) & statusTag != 0 || (state.doubles && !(standing && previous?.calm.contains(b) == true)) {
+                state.typesOff.insert(b)
+            }
             state.foes.append(.init(battler: b, species: shown, types: types, box: box, weaknesses: weak))
         }
         guard !state.foes.isEmpty else { return nil }
+
+        // Your two Pokemon in a double battle: their types go inside their own HP boxes, under the same rules.
+        if state.doubles, !state.partyMenu {
+            for b in [0, 2] {
+                let mon = Array(mons[(96 * b)..<(96 * b + 96)])
+                guard u16(mon, 0) > 0 else { continue }
+                let box = healthbox(core, ids: boxIds, battler: b)
+                let was = previous?.own.first(where: { $0.battler == b })?.box
+                let standing = settled(box, was: was)
+                if standing { state.calm.insert(b) }
+                if u32(mon, 80) & statusTag != 0 || !(standing && previous?.calm.contains(b) == true) {
+                    state.typesOff.insert(b)
+                }
+                state.own.append(.init(battler: b, types: [Int(mon[34]), Int(mon[35]), Int(mon[36])], box: box))
+            }
+        }
 
         if !state.doubles, !state.partyMenu, u16(Array(mons[0..<96]), 0) > 0 {
             state.playerTypes = [Int(mons[34]), Int(mons[35]), Int(mons[36])]
@@ -345,6 +389,23 @@ enum BattleReader {
         let misc = u32(secure, order[3] * 12 + 8)
         guard species > 0 else { return nil }
         return (species, Int((misc >> 29) & 3), (b[19] >> 2) & 1 != 0)
+    }
+
+    /// Whether a box stands where it did on the previous read (within `settleSlack` on both axes); false without both.
+    private static func settled(_ box: CGPoint?, was before: CGPoint?) -> Bool {
+        guard let box, let before else { return false }
+        return abs(box.x - before.x) <= settleSlack && abs(box.y - before.y) <= settleSlack
+    }
+
+    /// Top-left corner of a battler's HP box: the sprite must be in use, shown, and owned by that battler.
+    private static func healthbox(_ core: MGBACore, ids: [UInt8]?, battler b: Int) -> CGPoint? {
+        guard let ids, ids[b] < 64,
+              let sprite = core.readMemory(address: sprites + UInt32(ids[b]) * 68, length: 68) else { return nil }
+        let flags = u16(sprite, 62)
+        guard flags & 1 != 0, flags & 4 == 0, Int(s16(sprite, 58)) == b else { return nil }
+        let x = Int(s16(sprite, 0x20)) + Int(s16(sprite, 0x24)) + Int(Int8(bitPattern: sprite[0x28]))
+        let y = Int(s16(sprite, 0x22)) + Int(s16(sprite, 0x26)) + Int(Int8(bitPattern: sprite[0x29]))
+        return CGPoint(x: x, y: y)
     }
 
     private static func u16(_ b: [UInt8], _ o: Int) -> UInt16 { UInt16(b[o]) | UInt16(b[o + 1]) << 8 }
