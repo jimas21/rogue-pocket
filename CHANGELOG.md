@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/jimas21/rogue-pocket/compare/v0.3.0...v0.3.1) (2026-10-25)
+
+
+### Fixes
+
+* **overlay:** types come back with their HP box, a third type fits before HP, and none stay lit while the screen fades ([afcaef5](https://github.com/jimas21/rogue-pocket/commit/afcaef5b6ec31846da12273b6f927c7dec85601e))
+
 ## [0.3.0](https://github.com/jimas21/rogue-pocket/compare/v0.2.0...v0.3.0) (2026-10-25)
 
 
