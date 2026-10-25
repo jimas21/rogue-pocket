@@ -16,14 +16,17 @@ struct BattleOverlayView: View {
     private static let markGap: CGFloat = 4
     private static let markPale = Color(red: 196 / 255, green: 196 / 255, blue: 204 / 255)
     /// Types inside an HP box, in the blank band at the left end of the HP-bar row under the name (a foe's box starts
-    /// its icons at foeTypesX, yours at ownTypesX). Three types sit closer and start further left.
+    /// its icons at foeTypesX, yours at ownTypesX). Three types are drawn smaller (6 px, 1 px apart), start 2 px further
+    /// left and 1 px lower, so all three end before the "HP" label.
     private static let foeTypesX: CGFloat = 8
     private static let ownTypesX: CGFloat = 16
     private static let typesY: CGFloat = 15
     private static let typesIcon: CGFloat = 8
     private static let typesGap: CGFloat = 1
     private static let threeTypesShift: CGFloat = 2
-    private static let threeTypesGap: CGFloat = 0
+    private static let threeTypesGap: CGFloat = 1
+    private static let threeTypesIcon: CGFloat = 6
+    private static let threeTypesDrop: CGFloat = 1
     /// The switch screen: the first member's big card (its free spot is just above the card), then the free gap in
     /// the second row of each of the five slots on the right.
     private static let partySlots = [CGPoint(x: 60, y: 17)] + (0..<5).map { CGPoint(x: 165, y: 26 + 24 * CGFloat($0)) }
@@ -40,16 +43,19 @@ struct BattleOverlayView: View {
                 return
             }
             // A double battle draws only the types inside the four HP boxes and the move marks: both foes' weakness
-            // lists are in the strip under the picture and in the band above it.
+            // lists are in the strip under the picture and in the band above it. While the game fades the boxes or the
+            // screen nothing sits on the picture: the singles foe's types stay off with the others (typesOff), and its
+            // weaknesses and your types are skipped here.
             if !state.doubles, let foe = state.foes.first, let box = foe.box {
-                // Singles: its own types inside its HP box, left of "HP" (mirroring your box); what it is weak to on
-                // the empty background above the box, ending before its sprite (x 144). One icon size everywhere: 8.
-                if !state.typesOff.contains(foe.battler) {
-                    drawTypes(foe.types, x: box.x + 8, y: box.y + 15, icon: 8, divider: false, ctx: ctx, s: s)
+                // Singles: its own types inside its HP box, left of "HP", placed like every other foe box (three types
+                // are drawn smaller so they end before the label); what it is weak to on the empty background above
+                // the box, ending before its sprite (x 144).
+                drawBoxTypes(foe.types, battler: foe.battler, box: box, x: Self.foeTypesX, state: state, ctx: ctx, s: s)
+                if !state.fading {
+                    drawRow(foe.weaknesses, x: box.x + 2, y: box.y - 11, icon: 8, end: 143, ctx: ctx, s: s)
                 }
-                drawRow(foe.weaknesses, x: box.x + 2, y: box.y - 11, icon: 8, end: 143, ctx: ctx, s: s)
             }
-            if let box = state.playerBox, !state.playerTypes.isEmpty {
+            if !state.fading, let box = state.playerBox, !state.playerTypes.isEmpty {
                 // Your types in your HP box's empty corner, right of where a status (PSN, BRN...) appears.
                 drawTypes(state.playerTypes, x: box.x + 42, y: box.y + 24, icon: 8, divider: false, ctx: ctx, s: s)
             }
@@ -110,16 +116,16 @@ struct BattleOverlayView: View {
         return x + 4
     }
 
-    /// A Pokemon's types inside its HP box (doubles), unless the box is to stay bare right now. Three types sit closer
-    /// together and start further left, so they still end before the "HP" label.
+    /// A Pokemon's types inside its HP box, unless the box is to stay bare right now. Three types are drawn smaller,
+    /// 1 px apart, 2 px further left and 1 px lower, so they still end before the "HP" label.
     private func drawBoxTypes(_ types: [Int], battler: Int, box: CGPoint?, x offset: CGFloat, state: BattleOverlayState,
                               ctx: GraphicsContext, s: CGFloat) {
         guard let box, !state.typesOff.contains(battler) else { return }
         var shown: [Int] = []
         for t in types where t != 9 && !shown.contains(t) { shown.append(t) }
         if shown.count >= 3 {
-            drawTypes(types, x: box.x + offset - Self.threeTypesShift, y: box.y + Self.typesY, icon: Self.typesIcon,
-                      gap: Self.threeTypesGap, divider: false, ctx: ctx, s: s)
+            drawTypes(types, x: box.x + offset - Self.threeTypesShift, y: box.y + Self.typesY + Self.threeTypesDrop,
+                      icon: Self.threeTypesIcon, gap: Self.threeTypesGap, divider: false, ctx: ctx, s: s)
         } else {
             drawTypes(types, x: box.x + offset, y: box.y + Self.typesY, icon: Self.typesIcon, gap: Self.typesGap,
                       divider: false, ctx: ctx, s: s)

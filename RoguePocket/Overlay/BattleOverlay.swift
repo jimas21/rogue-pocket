@@ -40,6 +40,13 @@ struct BattleOverlayState: Equatable {
         let multiplier: Double
     }
 
+    /// Where a box last showed its types: its spot, its Pokemon and the picture under them.
+    struct Seen: Equatable {
+        let box: CGPoint
+        let species: Int
+        let band: [UInt32]
+    }
+
     var doubles = false
     var foes: [Foe] = []
     /// Your Pokemon's types and the top-left of its HP box (singles; drawn in the box's empty corner).
@@ -53,6 +60,13 @@ struct BattleOverlayState: Equatable {
     /// Battlers whose HP box stood where it was on the previous read. A box shows its types only after two such reads
     /// in a row, so a screen that is still fading in or a box still sliding never carries them.
     var calm: Set<Int> = []
+    /// Where each box last showed its types (doubles). The game hides every box during a move and puts it back where it
+    /// was, a frame or two before the picture shows it, so a box that returns draws its types again on the first read
+    /// where the picture there looks as it did when they were last drawn.
+    var seen: [Int: Seen] = [:]
+    /// The game is fading the HP boxes or the whole screen (into a menu, out of the battle): nothing is drawn on the
+    /// picture while it does, in singles or doubles.
+    var fading = false
     /// Only while the move menu is open.
     var moveTags: [MoveTag] = []
     /// The switch screen is up: the weaknesses go top left, and members get a hint when that hit is not neutral.
@@ -204,6 +218,20 @@ enum BattleReader {
     private static let statusTag: UInt32 = 0x10FF
     /// How far a box may move between two reads and still count as standing (it bounces while a move is picked).
     private static let settleSlack: CGFloat = 2
+    /// The blank band under the name inside an HP box, from the box's top-left: where the types go. A foe's band starts
+    /// at bandFoeX, yours at bandOwnX.
+    private static let bandFoeX: Int = 6
+    private static let bandOwnX: Int = 14
+    private static let bandY: Int = 15
+    private static let bandWidth: Int = 21
+    private static let bandHeight: Int = 8
+    /// The game's screen and palette fade (gPaletteFade): `active` is bit 7 of the byte at +7, the mode is the byte at +9
+    /// & 3 (0 normal, 1 fast, 2 hardware), and the u32 at +0 holds the selected palettes in a normal fade or the blend
+    /// targets in a hardware fade (0x10 is sprites).
+    private static let paletteFade: UInt32 = 0x0203_67DC
+    /// The palettes as the game set them, and as shown after the fade (OBJ palette p sits at +0x200 + 32 p in both).
+    private static let paletteUnfaded: UInt32 = 0x0203_5F1C
+    private static let paletteFaded: UInt32 = 0x0203_631C
 
     /// nil outside a battle. `previous` is kept while a foe's slot is mid-swap (see below).
     static func read(_ core: MGBACore, data: TypeData, previous: BattleOverlayState?) -> BattleOverlayState? {
@@ -217,6 +245,7 @@ enum BattleReader {
         state.doubles = count == 4
         let structPtr = core.readMemory(address: battleStructPtr, length: 4).map { u32($0, 0) }
         let boxIds = core.readMemory(address: healthboxSpriteIds, length: 4)
+        state.fading = !state.partyMenu && boxesFading(core, ids: boxIds)
 
         for b in state.doubles ? [1, 3] : [1] {
             let mon = Array(mons[(96 * b)..<(96 * b + 96)])
@@ -263,9 +292,14 @@ enum BattleReader {
             // reads has not landed, so its types wait.
             let was = previous?.foes.first(where: { $0.battler == b })?.box
             let standing = settled(box, was: was)
-            if standing { state.calm.insert(b) }
-            if u32(mon, 80) & statusTag != 0 || (state.doubles && !(standing && previous?.calm.contains(b) == true)) {
+            let back = state.doubles && returned(core, box: box, species: shown, seen: previous?.seen[b], x: bandFoeX)
+            if (standing || back) && !state.fading { state.calm.insert(b) }
+            if state.fading || u32(mon, 80) & statusTag != 0
+                || (state.doubles && !(back || (standing && previous?.calm.contains(b) == true))) {
                 state.typesOff.insert(b)
+            }
+            if state.doubles, !state.partyMenu {
+                remember(&state, core: core, battler: b, box: box, species: shown, previous: previous, x: bandFoeX)
             }
             state.foes.append(.init(battler: b, species: shown, types: types, box: box, weaknesses: weak))
         }
@@ -276,13 +310,17 @@ enum BattleReader {
             for b in [0, 2] {
                 let mon = Array(mons[(96 * b)..<(96 * b + 96)])
                 guard u16(mon, 0) > 0 else { continue }
+                let species = Int(u16(mon, 0))
                 let box = healthbox(core, ids: boxIds, battler: b)
                 let was = previous?.own.first(where: { $0.battler == b })?.box
                 let standing = settled(box, was: was)
-                if standing { state.calm.insert(b) }
-                if u32(mon, 80) & statusTag != 0 || !(standing && previous?.calm.contains(b) == true) {
+                let back = returned(core, box: box, species: species, seen: previous?.seen[b], x: bandOwnX)
+                if (standing || back) && !state.fading { state.calm.insert(b) }
+                if state.fading || u32(mon, 80) & statusTag != 0
+                    || !(back || (standing && previous?.calm.contains(b) == true)) {
                     state.typesOff.insert(b)
                 }
+                remember(&state, core: core, battler: b, box: box, species: species, previous: previous, x: bandOwnX)
                 state.own.append(.init(battler: b, types: [Int(mon[34]), Int(mon[35]), Int(mon[36])], box: box))
             }
         }
@@ -395,6 +433,71 @@ enum BattleReader {
     private static func settled(_ box: CGPoint?, was before: CGPoint?) -> Bool {
         guard let box, let before else { return false }
         return abs(box.x - before.x) <= settleSlack && abs(box.y - before.y) <= settleSlack
+    }
+
+    /// The 21 x 8 band of the game picture under a box's name, from its top-left; nil when any of it lies outside the
+    /// picture. The fourth byte of a pixel is padding.
+    private static func band(_ core: MGBACore, box: CGPoint, x offset: Int) -> [UInt32]? {
+        let left = Int(box.x) + offset, top = Int(box.y) + bandY
+        guard left >= 0, top >= 0, left + bandWidth <= MGBACore.width, top + bandHeight <= MGBACore.height else { return nil }
+        var out: [UInt32] = []
+        out.reserveCapacity(bandWidth * bandHeight)
+        for row in 0..<bandHeight {
+            for col in 0..<bandWidth {
+                out.append(core.pixels[(top + row) * MGBACore.width + left + col] & 0x00FF_FFFF)
+            }
+        }
+        return out
+    }
+
+    /// Whether a box is back where its types were last drawn, holding the same Pokemon, with the picture there as it
+    /// looked then (so the game has drawn it again, not only moved it in memory). A move bounces the box a pixel and the
+    /// picture trails memory by a frame, so a band that matches one pixel above the box counts too: the icons still land
+    /// on blank pixels there, which they would not one pixel below.
+    private static func returned(_ core: MGBACore, box: CGPoint?, species: Int, seen: BattleOverlayState.Seen?,
+                                 x offset: Int) -> Bool {
+        guard let box, let seen, seen.species == species, settled(box, was: seen.box) else { return false }
+        for lift in 0...1 {
+            let at = CGPoint(x: box.x, y: box.y - CGFloat(lift))
+            if let now = band(core, box: at, x: offset), now == seen.band { return true }
+        }
+        return false
+    }
+
+    /// Notes where a box shows its types on this read. While the box is hidden what was noted is carried; a box that is
+    /// up but not drawn keeps it only if it has not moved and still holds the same Pokemon.
+    private static func remember(_ state: inout BattleOverlayState, core: MGBACore, battler b: Int, box: CGPoint?,
+                                 species: Int, previous: BattleOverlayState?, x offset: Int) {
+        let kept = previous?.seen[b]
+        guard let box else {
+            state.seen[b] = kept
+            return
+        }
+        if !state.typesOff.contains(b), let now = band(core, box: box, x: offset) {
+            state.seen[b] = BattleOverlayState.Seen(box: box, species: species, band: now)
+        } else if let kept, kept.species == species, settled(box, was: kept.box) {
+            state.seen[b] = kept
+        }
+    }
+
+    /// True while the game fades the HP boxes or the whole screen: a fast fade, a hardware fade that reaches sprites, or the
+    /// boxes' own palette caught half-way (shown differs from set). The game's partial fades (one Pokemon's flash, the
+    /// background) leave the box art as it is and do not count. Unreadable memory counts as not fading.
+    private static func boxesFading(_ core: MGBACore, ids: [UInt8]?) -> Bool {
+        if let fade = core.readMemory(address: paletteFade, length: 12), fade[7] & 0x80 != 0 {
+            let mode = fade[9] & 3
+            if mode == 1 || (mode == 2 && u32(fade, 0) & 0x10 != 0) { return true }
+        }
+        guard let ids else { return false }
+        for id in ids where id < 64 {
+            guard let sprite = core.readMemory(address: sprites + UInt32(id) * 68, length: 68) else { return false }
+            guard u16(sprite, 62) & 1 != 0 else { continue }
+            let offset = UInt32(0x200 + 32 * Int(u16(sprite, 4) >> 12))
+            guard let shown = core.readMemory(address: paletteFaded + offset, length: 32),
+                  let unfaded = core.readMemory(address: paletteUnfaded + offset, length: 32) else { return false }
+            return shown != unfaded
+        }
+        return false
     }
 
     /// Top-left corner of a battler's HP box: the sprite must be in use, shown, and owned by that battler.
