@@ -43,6 +43,7 @@ enum FoeBoardMetrics {
     static let bandLabelGap: CGFloat = 2
     static let bandEntryGap: CGFloat = 7
     static let bandTextSize: CGFloat = 12
+    static let bandMaxEntries: CGFloat = 7
 
     // Both
     static let dimOpacity: CGFloat = 0.45
@@ -189,7 +190,8 @@ private struct FoeStripColumn: View {
                 .capCentred(size: M.stripNameSize)
                 .frame(width: columnWidth - M.stripNameX, height: pipHeight, alignment: .leading)
                 .offset(x: M.stripNameX, y: headerY)
-            ForEach(Array(foe.weaknesses.enumerated()), id: \.offset) { k, weakness in
+            // The strip holds two rows; the list is sorted biggest first, so what is cut is the smallest.
+            ForEach(Array(foe.weaknesses.prefix(perRow * 2).enumerated()), id: \.offset) { k, weakness in
                 WeaknessEntry(weakness: weakness, image: overlay.typeIcons[weakness.type], dimmed: !bright,
                               icon: M.stripIcon, labelGap: M.stripLabelGap, labelSize: M.stripLabelSize)
                     .frame(width: step, height: M.stripIcon, alignment: .leading)
@@ -249,7 +251,8 @@ private struct FoeBandRow: View {
                 .capCentred(size: M.bandTextSize)
             Color.clear.frame(width: M.bandNameToList, height: 1)
             HStack(alignment: .center, spacing: M.bandEntryGap) {
-                ForEach(Array(foe.weaknesses.enumerated()), id: \.offset) { _, weakness in
+                // The band holds seven entries, biggest first.
+                ForEach(Array(foe.weaknesses.prefix(Int(M.bandMaxEntries)).enumerated()), id: \.offset) { _, weakness in
                     WeaknessEntry(weakness: weakness, image: icons[weakness.type], dimmed: !bright,
                                   icon: M.bandIcon, labelGap: M.bandLabelGap, labelSize: M.bandTextSize)
                 }
