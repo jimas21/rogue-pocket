@@ -64,8 +64,10 @@ struct BattleOverlayState: Equatable {
     /// was, a frame or two before the picture shows it, so a box that returns draws its types again on the first read
     /// where the picture there looks as it did when they were last drawn.
     var seen: [Int: Seen] = [:]
-    /// The game is fading the HP boxes or the whole screen (into a menu, out of the battle): nothing is drawn on the
-    /// picture while it does, in singles or doubles.
+    /// The game is fading the HP boxes or the whole screen (into a menu, out of the battle), in singles or doubles:
+    /// the type icons, the singles foe's weaknesses and your singles types are held back. The move marks are not,
+    /// because the move menu is never open during these fades. Always false on the switch screen, which reuses the
+    /// HP boxes' sprite slots, so their palette says nothing about it; its hints are drawn as on any other read.
     var fading = false
     /// Only while the move menu is open.
     var moveTags: [MoveTag] = []
@@ -245,7 +247,7 @@ enum BattleReader {
         state.doubles = count == 4
         let structPtr = core.readMemory(address: battleStructPtr, length: 4).map { u32($0, 0) }
         let boxIds = core.readMemory(address: healthboxSpriteIds, length: 4)
-        state.fading = !state.partyMenu && boxesFading(core, ids: boxIds)
+        state.fading = !state.partyMenu && boxesFading(core, ids: boxIds, doubles: state.doubles)
 
         for b in state.doubles ? [1, 3] : [1] {
             let mon = Array(mons[(96 * b)..<(96 * b + 96)])
@@ -480,18 +482,23 @@ enum BattleReader {
         }
     }
 
-    /// True while the game fades the HP boxes or the whole screen: a fast fade, a hardware fade that reaches sprites, or the
-    /// boxes' own palette caught half-way (shown differs from set). The game's partial fades (one Pokemon's flash, the
-    /// background) leave the box art as it is and do not count. Unreadable memory counts as not fading.
-    private static func boxesFading(_ core: MGBACore, ids: [UInt8]?) -> Bool {
+    /// True while the game fades the HP boxes or the whole screen: a fast fade, a hardware fade that reaches sprites,
+    /// or the boxes' own palette caught half-way (shown differs from set). The game's partial fades (one Pokemon's
+    /// flash, the background) leave the box art as it is and do not count. Unreadable memory counts as not fading.
+    /// Only a battler's own HP box decides (in use, shown, owned by that battler, as in `healthbox`): slots 0-1 in
+    /// singles, 0-3 in doubles. At a battle's start the id slots can still point at the last scene's sprites, and in
+    /// singles slots 2 and 3 are never HP boxes, so any other sprite's palette could keep every type hidden for the
+    /// whole battle.
+    private static func boxesFading(_ core: MGBACore, ids: [UInt8]?, doubles: Bool) -> Bool {
         if let fade = core.readMemory(address: paletteFade, length: 12), fade[7] & 0x80 != 0 {
             let mode = fade[9] & 3
             if mode == 1 || (mode == 2 && u32(fade, 0) & 0x10 != 0) { return true }
         }
         guard let ids else { return false }
-        for id in ids where id < 64 {
+        for (b, id) in ids.prefix(doubles ? 4 : 2).enumerated() where id < 64 {
             guard let sprite = core.readMemory(address: sprites + UInt32(id) * 68, length: 68) else { return false }
-            guard u16(sprite, 62) & 1 != 0 else { continue }
+            let flags = u16(sprite, 62)
+            guard flags & 1 != 0, flags & 4 == 0, Int(s16(sprite, 58)) == b else { continue }
             let offset = UInt32(0x200 + 32 * Int(u16(sprite, 4) >> 12))
             guard let shown = core.readMemory(address: paletteFaded + offset, length: 32),
                   let unfaded = core.readMemory(address: paletteUnfaded + offset, length: 32) else { return false }

@@ -44,8 +44,10 @@ struct BattleOverlayView: View {
             }
             // A double battle draws only the types inside the four HP boxes and the move marks: both foes' weakness
             // lists are in the strip under the picture and in the band above it. While the game fades the boxes or the
-            // screen nothing sits on the picture: the singles foe's types stay off with the others (typesOff), and its
-            // weaknesses and your types are skipped here.
+            // screen, no type icons, weaknesses or your types are drawn: the singles foe's types stay off with the
+            // others (typesOff), and its weaknesses and your types are skipped here. The move marks below are drawn
+            // anyway, because the move menu is never open during these fades, and the switch screen above draws its
+            // hints whatever the boxes' palette shows.
             if !state.doubles, let foe = state.foes.first, let box = foe.box {
                 // Singles: its own types inside its HP box, left of "HP", placed like every other foe box (three types
                 // are drawn smaller so they end before the label); what it is weak to on the empty background above
