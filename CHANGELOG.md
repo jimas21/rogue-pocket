@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/jimas21/rogue-pocket/compare/v0.3.1...v0.3.2) (2026-10-25)
+
+
+### Fixes
+
+* **overlay:** a leftover sprite cannot keep the types hidden for a whole battle ([829536c](https://github.com/jimas21/rogue-pocket/commit/829536c6f023f87cf2de3d839bcf37802c10fbbe))
+
 ## [0.3.1](https://github.com/jimas21/rogue-pocket/compare/v0.3.0...v0.3.1) (2026-10-25)
 
 
