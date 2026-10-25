@@ -16,7 +16,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.REPLACE.roguepocket   # placeholder; CI overrides from vars.BUNDLE_ID
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "0.2.0"                      # x-release-please-version
+        MARKETING_VERSION: "0.3.0"                      # x-release-please-version
         CURRENT_PROJECT_VERSION: "1"                          # CI overrides with the run number
         INFOPLIST_FILE: Config/Info.plist
         GENERATE_INFOPLIST_FILE: "NO"

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/jimas21/rogue-pocket/compare/v0.2.0...v0.3.0) (2026-10-25)
+
+
+### Features
+
+* **overlay:** double battles show every Pokemon's types in its HP box, never over a status like PSN ([a342d7f](https://github.com/jimas21/rogue-pocket/commit/a342d7fa2e0e8e22ff18bb5b176580144abd897f))
+
+
+### Fixes
+
+* **overlay:** a x8 hit shows its 8, and a foe with many weaknesses no longer shows a half-cut row ([feba58a](https://github.com/jimas21/rogue-pocket/commit/feba58aff3807617bdcbc4fafbf1ded7a3ab5c82))
+
 ## [0.2.0](https://github.com/jimas21/rogue-pocket/compare/v0.1.0...v0.2.0) (2026-10-24)
 
 
