@@ -110,7 +110,7 @@ jobs:
             echo "### PokeRogue uploaded to TestFlight"
             echo ""
             echo "- PokeRogue: \`${UPSTREAM_REF}\`"
-            echo "- Build number: \`${GITHUB_RUN_NUMBER}\`"
+            echo "- TestFlight version: \`${MARKETING_VERSION} (${BUILD_NUMBER})\`"
             echo ""
             echo '```'
             cat Game/BUILD-INFO.txt
