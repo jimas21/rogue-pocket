@@ -1,0 +1,122 @@
+name: PokeRogue TestFlight
+run-name: PokeRogue ${{ inputs.upstream_ref }}
+
+# A second app on the same Apple team: the offline PokeRogue app from jimas21/pokerogue-ios. It is built here
+# because this repository holds the team's App Store Connect key (GitHub secrets can't be shared between
+# repositories). Nothing from Rogue Pocket is built or changed; only that repository's code is checked out.
+#
+# Started by "PokeRogue upstream check" when PokeRogue publishes a release, or by hand with a release tag.
+# The PokeRogue bundle ID is a secret (POKEROGUE_BUNDLE_ID) so public logs show it masked.
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: PokeRogue release tag to build (e.g. v1.12.2.6)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pokerogue-testflight
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build game, archive, upload
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      BUNDLE_ID: ${{ secrets.POKEROGUE_BUNDLE_ID }}
+      TEAM_ID: ${{ vars.TEAM_ID }}
+      UPSTREAM_REF: ${{ inputs.upstream_ref }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - name: Check out the PokeRogue app
+        uses: actions/checkout@v5
+        with:
+          repository: jimas21/pokerogue-ios
+          ref: main
+          persist-credentials: false
+
+      - name: Preflight (settings present and well-formed)
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: bash ci/preflight.sh
+
+      - name: Write API key to a temp file
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: bash ci/write_key.sh
+
+      - name: Python tools (icon, Apple setup)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pillow "pyjwt[crypto]"
+
+      # Before the long build: registers the bundle ID, checks the App Store Connect app exists, and sets up the
+      # internal TestFlight group. Stops here with instructions if the app record is missing.
+      - name: Apple setup
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: '"$RUNNER_TEMP/venv/bin/python" ci/asc_setup.py'
+
+      - name: Get PokeRogue source
+        run: |
+          git clone --depth 1 --branch "$UPSTREAM_REF" --recurse-submodules --shallow-submodules \
+            https://github.com/pagefaultgames/pokerogue.git upstream
+
+      - name: Set up Node (version PokeRogue asks for)
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: upstream/.nvmrc
+
+      - name: Build the game (offline app mode)
+        run: bash ci/build_game.sh
+
+      - name: Make app icon
+        run: '"$RUNNER_TEMP/venv/bin/python" ci/make_icon.py Game/logo512.png App/Assets.xcassets/AppIcon.appiconset/AppIcon.png'
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen || { brew update && brew install xcodegen; }
+
+      - name: Generate project and archive
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: bash ci/archive.sh
+
+      - name: Export and upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: bash ci/export_upload.sh
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### PokeRogue uploaded to TestFlight"
+            echo ""
+            echo "- PokeRogue: \`${UPSTREAM_REF}\`"
+            echo "- Build number: \`${GITHUB_RUN_NUMBER}\`"
+            echo ""
+            echo '```'
+            cat Game/BUILD-INFO.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove API key file
+        if: always()
+        run: bash ci/cleanup.sh

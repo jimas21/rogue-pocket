@@ -1,0 +1,35 @@
+name: PokeRogue upstream check
+
+# Once a day: if PokeRogue has published a release that has not been built yet, start "PokeRogue TestFlight" for
+# it. New events and fixes then reach the phone through TestFlight's automatic updates. (See
+# pokerogue-testflight.yml for why the PokeRogue app builds from this repository.)
+on:
+  schedule:
+    - cron: "23 13 * * *"   # daily, 13:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write   # to start the build workflow
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Compare the latest PokeRogue release with what was built
+        run: |
+          set -euo pipefail
+          tag="$(gh api repos/pagefaultgames/pokerogue/releases/latest --jq .tag_name)"
+          echo "Latest PokeRogue release: $tag"
+          built="$(gh run list -R "$GITHUB_REPOSITORY" --workflow pokerogue-testflight.yml --limit 100 \
+            --json displayTitle,status,conclusion \
+            --jq '.[] | select(.conclusion == "success" or .status != "completed") | .displayTitle')"
+          if grep -qxF "PokeRogue $tag" <<<"$built"; then
+            echo "PokeRogue $tag is already on TestFlight (or building). Nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh workflow run pokerogue-testflight.yml -R "$GITHUB_REPOSITORY" -f upstream_ref="$tag"
+          echo "Started the TestFlight build for PokeRogue $tag." | tee -a "$GITHUB_STEP_SUMMARY"
