@@ -1,0 +1,43 @@
+name: PokeRogue TestFlight status
+
+# Read-only: asks App Store Connect where the latest PokeRogue builds are (Apple processing, internal testing, the
+# TestFlight group). Run by hand from the Actions tab. Prints no emails or names. See pokerogue-testflight.yml for
+# why the PokeRogue app's workflows live in this repository.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BUNDLE_ID: ${{ secrets.POKEROGUE_BUNDLE_ID }}
+    steps:
+      - name: Check out the PokeRogue app
+        uses: actions/checkout@v5
+        with:
+          repository: jimas21/pokerogue-ios
+          ref: main
+          persist-credentials: false
+
+      - name: Write API key to a temp file
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: bash ci/write_key.sh
+
+      - name: Ask App Store Connect
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "pyjwt[crypto]"
+          "$RUNNER_TEMP/venv/bin/python" ci/asc_status.py
+
+      - name: Remove API key file
+        if: always()
+        run: bash ci/cleanup.sh
